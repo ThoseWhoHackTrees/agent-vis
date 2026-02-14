@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 bevy = {version="0.18.0", features = ["dynamic_linking"]}
 bevy_tweening = "0.12"
+notify = "7.0"
+crossbeam-channel = "0.5"
+ignore = "0.4"
