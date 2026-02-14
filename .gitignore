@@ -1,3 +1,15 @@
+# Rust build artifacts
+/server/target
+**/*.rs.bk
+*.pdb
+
+# Cargo lock file (optional - uncomment if this is a library)
+# Cargo.lock
+
+# IDE directories
+.idea/
+.vscode/
+
 # Log files
 hooks/session_output.log
 *.log
