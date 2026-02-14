@@ -19,3 +19,4 @@ hooks/session_output.log
 # Added by cargo
 
 /target
+.git
