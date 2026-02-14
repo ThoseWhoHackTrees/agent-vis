@@ -9,11 +9,13 @@ EVENT_NAME=$(echo "$INPUT" | grep -o '"hook_event_name"[^,}]*' | cut -d'"' -f4)
 # Also log raw input for debugging
 echo "$INPUT" >>"$(dirname "$0")/session_output.log"
 
+SESSION_ID=$(echo "$INPUT" | grep -o '"session_id"[^,}]*' | cut -d'"' -f4)
+
 case "$EVENT_NAME" in
 "SessionStart")
 	CWD=$(echo "$INPUT" | grep -o '"cwd"[^,}]*' | cut -d'"' -f4)
 	MODEL=$(echo "$INPUT" | grep -o '"model"[^,}]*' | cut -d'"' -f4)
-	PAYLOAD="{\"cwd\":\"$CWD\",\"model\":\"$MODEL\"}"
+	PAYLOAD="{\"session_id\":\"$SESSION_ID\",\"cwd\":\"$CWD\",\"model\":\"$MODEL\"}"
 	curl -s -X POST \
 		-H "Content-Type: application/json" \
 		-d "$PAYLOAD" \
@@ -25,7 +27,7 @@ case "$EVENT_NAME" in
 	# Try different patterns for file_path
 	FILE_PATH=$(echo "$INPUT" | grep -o '"file_path"[^,}]*' | head -1 | cut -d'"' -f4)
 
-	PAYLOAD="{\"tool_name\":\"$TOOL_NAME\",\"tool_input\":{\"file_path\":\"$FILE_PATH\"}}"
+	PAYLOAD="{\"session_id\":\"$SESSION_ID\",\"tool_name\":\"$TOOL_NAME\",\"tool_input\":{\"file_path\":\"$FILE_PATH\"}}"
 
 	case "$TOOL_NAME" in
 	"Read")

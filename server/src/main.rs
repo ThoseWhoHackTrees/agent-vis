@@ -5,6 +5,7 @@ use warp::{Filter, http::StatusCode};
 
 #[derive(Deserialize, Debug)]
 struct SessionStartPayload {
+    session_id: String,
     cwd: String,
     model: String,
 }
@@ -16,6 +17,7 @@ struct ToolInput {
 
 #[derive(Deserialize, Debug)]
 struct ToolUsePayload {
+    session_id: String,
     tool_name: String,
     tool_input: ToolInput,
 }
@@ -33,8 +35,8 @@ async fn main() {
         .map(
             |payload: SessionStartPayload, log: Arc<Mutex<Vec<String>>>| {
                 let entry = format!(
-                    "[SessionStart] cwd={}, model={}",
-                    payload.cwd, payload.model
+                    "[SessionStart] session_id={}, cwd={}, model={}",
+                    payload.session_id, payload.cwd, payload.model
                 );
                 println!("{}", entry);
                 tokio::spawn(async move {
@@ -50,8 +52,8 @@ async fn main() {
         .and(log_filter.clone())
         .map(|payload: ToolUsePayload, log: Arc<Mutex<Vec<String>>>| {
             let entry = format!(
-                "[Read] tool_name={}, file_path={}",
-                payload.tool_name, payload.tool_input.file_path
+                "[Read] session_id={}, tool_name={}, file_path={}",
+                payload.session_id, payload.tool_name, payload.tool_input.file_path
             );
             println!("{}", entry);
             tokio::spawn(async move {
@@ -66,8 +68,8 @@ async fn main() {
         .and(log_filter.clone())
         .map(|payload: ToolUsePayload, log: Arc<Mutex<Vec<String>>>| {
             let entry = format!(
-                "[Write] tool_name={}, file_path={}",
-                payload.tool_name, payload.tool_input.file_path
+                "[Write] session_id={}, tool_name={}, file_path={}",
+                payload.session_id, payload.tool_name, payload.tool_input.file_path
             );
             println!("{}", entry);
             tokio::spawn(async move {
@@ -82,8 +84,8 @@ async fn main() {
         .and(log_filter)
         .map(|payload: ToolUsePayload, log: Arc<Mutex<Vec<String>>>| {
             let entry = format!(
-                "[Edit] tool_name={}, file_path={}",
-                payload.tool_name, payload.tool_input.file_path
+                "[Edit] session_id={}, tool_name={}, file_path={}",
+                payload.session_id, payload.tool_name, payload.tool_input.file_path
             );
             println!("{}", entry);
             tokio::spawn(async move {
