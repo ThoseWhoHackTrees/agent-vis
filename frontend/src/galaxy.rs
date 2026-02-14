@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_fontmesh::{FontMesh, TextMesh, TextMeshBundle, TextMeshStyle};
 use crate::fs_model::{FileNode, FileSystemModel};
 use std::f32::consts::PI;
 
@@ -92,6 +93,7 @@ pub fn spawn_star(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
     model: &FileSystemModel,
     node_idx: usize,
 ) -> Entity {
@@ -123,15 +125,26 @@ pub fn spawn_star(
     let label_pos = position + label_offset;
 
     commands.spawn((
-        Text2d(node.name.clone()),
-        TextFont {
-            font_size: 50.0,
+        TextMeshBundle {
+            text_mesh: TextMesh {
+                text: node.name.clone(),
+                font: asset_server.load("fonts/FiraMono-Medium.ttf"),
+                style: TextMeshStyle {
+                    depth: 0.2,
+                    subdivision: 10,
+                    ..default()
+                },
+            },
+            material: MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                emissive: LinearRgba::from(Color::WHITE) * 2.0,
+                unlit: true,
+                ..default()
+            })),
+            transform: Transform::from_translation(label_pos)
+                .with_scale(Vec3::splat(0.5)),
             ..default()
         },
-        TextColor(Color::srgb(1.0, 1.0, 1.0)),
-        TextLayout::new_with_justify(Justify::Center),
-        Transform::from_translation(label_pos)
-            .with_scale(Vec3::splat(0.1)),
         FileLabel {
             star_entity,
             offset: label_offset,
@@ -146,9 +159,10 @@ pub fn spawn_galaxy(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
     model: &FileSystemModel,
 ) {
     for node_idx in 0..model.total_nodes() {
-        spawn_star(commands, meshes, materials, model, node_idx);
+        spawn_star(commands, meshes, materials, asset_server, model, node_idx);
     }
 }

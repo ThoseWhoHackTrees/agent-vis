@@ -4,6 +4,7 @@ mod watcher;
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
+use bevy_fontmesh::FontMeshPlugin;
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker};
 use galaxy::{spawn_star, FileLabel};
@@ -55,6 +56,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(FontMeshPlugin)
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
         .insert_resource(CameraController {
             orbit_distance: 40.0,
@@ -90,6 +92,7 @@ fn setup_galaxy(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     // Get watch path from command line
     let args: Vec<String> = env::args().collect();
@@ -117,7 +120,7 @@ fn setup_galaxy(
     // Spawn initial galaxy
     let mut entity_map = HashMap::new();
     for node_idx in 0..model.total_nodes() {
-        let entity = spawn_star(&mut commands, &mut meshes, &mut materials, &model, node_idx);
+        let entity = spawn_star(&mut commands, &mut meshes, &mut materials, &asset_server, &model, node_idx);
         entity_map.insert(node_idx, entity);
     }
 
@@ -135,6 +138,7 @@ fn update_file_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     // Process all pending file system events
     while let Ok(event) = fs_state.event_receiver.try_recv() {
@@ -153,6 +157,7 @@ fn update_file_system(
                         &mut commands,
                         &mut meshes,
                         &mut materials,
+                        &asset_server,
                         &fs_state.model,
                         node_idx,
                     );
