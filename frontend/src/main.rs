@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker};
-use galaxy::spawn_star;
+use galaxy::{spawn_star, FileLabel};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -62,7 +62,7 @@ fn main() {
             orbit_height: 20.0,
         })
         .add_systems(Startup, (setup_camera, setup_lighting, setup_galaxy))
-        .add_systems(Update, (update_file_system, camera_orbit))
+        .add_systems(Update, (update_file_system, camera_orbit, billboard_labels))
         .run();
 }
 
@@ -201,5 +201,26 @@ fn camera_orbit(
 
     if let Ok(mut transform) = camera_query.single_mut() {
         *transform = Transform::from_xyz(x, y, z).looking_at(Vec3::ZERO, Vec3::Y);
+    }
+}
+
+fn billboard_labels(
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    star_query: Query<&Transform, With<galaxy::FileStar>>,
+    mut label_query: Query<(&mut Transform, &FileLabel), Without<galaxy::FileStar>>,
+) {
+    if let Ok(camera_transform) = camera_query.single() {
+        // Get camera rotation
+        let (_, camera_rotation, _) = camera_transform.to_scale_rotation_translation();
+
+        for (mut label_transform, file_label) in label_query.iter_mut() {
+            // Update label position to follow its star
+            if let Ok(star_transform) = star_query.get(file_label.star_entity) {
+                label_transform.translation = star_transform.translation + file_label.offset;
+            }
+
+            // Make the label face the camera
+            label_transform.rotation = camera_rotation;
+        }
     }
 }

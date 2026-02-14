@@ -10,6 +10,12 @@ pub struct FileStar {
 #[derive(Component)]
 pub struct StarGlow;
 
+#[derive(Component)]
+pub struct FileLabel {
+    pub star_entity: Entity,
+    pub offset: Vec3,
+}
+
 /// Calculate position for a node in a galaxy spiral pattern
 pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Vec3 {
     let node = &model.nodes[node_idx];
@@ -102,14 +108,37 @@ pub fn spawn_star(
         ..default()
     });
 
-    commands
+    // Spawn the star
+    let star_entity = commands
         .spawn((
             FileStar { node_index: node_idx },
             Mesh3d(mesh),
             MeshMaterial3d(material),
             Transform::from_translation(position),
         ))
-        .id()
+        .id();
+
+    // Spawn label as a separate entity (not a child)
+    let label_offset = Vec3::new(0.0, size + 1.5, 0.0);
+    let label_pos = position + label_offset;
+
+    commands.spawn((
+        Text2d(node.name.clone()),
+        TextFont {
+            font_size: 50.0,
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 1.0, 1.0)),
+        TextLayout::new_with_justify(Justify::Center),
+        Transform::from_translation(label_pos)
+            .with_scale(Vec3::splat(0.1)),
+        FileLabel {
+            star_entity,
+            offset: label_offset,
+        },
+    ));
+
+    star_entity
 }
 
 /// Spawn all stars for the initial file system
