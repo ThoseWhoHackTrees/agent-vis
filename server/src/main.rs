@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warp::{http::StatusCode, Filter};
+use warp::{Filter, http::StatusCode};
 
 #[derive(Deserialize, Debug)]
 struct SessionStartPayload {
@@ -30,17 +30,19 @@ async fn main() {
         .and(warp::path("session-start"))
         .and(warp::body::json())
         .and(log_filter.clone())
-        .map(|payload: SessionStartPayload, log: Arc<Mutex<Vec<String>>>| {
-            let entry = format!(
-                "[SessionStart] cwd={}, model={}",
-                payload.cwd, payload.model
-            );
-            println!("{}", entry);
-            tokio::spawn(async move {
-                log.lock().await.push(entry);
-            });
-            warp::reply::with_status("OK", StatusCode::OK)
-        });
+        .map(
+            |payload: SessionStartPayload, log: Arc<Mutex<Vec<String>>>| {
+                let entry = format!(
+                    "[SessionStart] cwd={}, model={}",
+                    payload.cwd, payload.model
+                );
+                println!("{}", entry);
+                tokio::spawn(async move {
+                    log.lock().await.push(entry);
+                });
+                warp::reply::with_status("OK", StatusCode::OK)
+            },
+        );
 
     let read_event = warp::post()
         .and(warp::path("read"))
