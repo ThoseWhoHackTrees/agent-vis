@@ -1,5 +1,6 @@
 # Rust build artifacts
 /server/target
+/frontend/target
 **/*.rs.bk
 *.pdb
 
