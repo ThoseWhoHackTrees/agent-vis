@@ -1,7 +1,14 @@
+// hello world
+mod agent;
 mod fs_model;
 mod galaxy;
 mod watcher;
+mod ws_client;
 
+use agent::{
+    agent_despawn_system, agent_state_machine, agent_transform_system, file_highlight_system,
+    process_ws_events, AgentArrivedEvent, AgentRegistry, WsClientState,
+};
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use bevy_fontmesh::FontMeshPlugin;
@@ -12,6 +19,7 @@ use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use watcher::{start_file_watcher, watch_directory, FileSystemEvent};
+use ws_client::start_ws_client;
 
 #[derive(Resource)]
 struct FileSystemState {
@@ -47,6 +55,9 @@ fn main() {
 
     println!("Watching directory: {}", watch_path.display());
 
+    // Start WebSocket client
+    let (ws_rx, _ws_handle) = start_ws_client();
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -63,8 +74,26 @@ fn main() {
             orbit_angle: 0.0,
             orbit_height: 20.0,
         })
+        .insert_resource(WsClientState { receiver: ws_rx })
+        .insert_resource(AgentRegistry::default())
+        .add_message::<AgentArrivedEvent>()
         .add_systems(Startup, (setup_camera, setup_lighting, setup_galaxy))
-        .add_systems(Update, (update_file_system, camera_orbit, billboard_labels))
+        .add_systems(
+            Update,
+            (
+                update_file_system,
+                camera_orbit,
+                billboard_labels,
+                (
+                    process_ws_events,
+                    agent_state_machine,
+                    agent_transform_system,
+                    agent_despawn_system,
+                    file_highlight_system,
+                )
+                    .chain(),
+            ),
+        )
         .run();
 }
 
