@@ -1,3 +1,8 @@
 # Log files
 hooks/session_output.log
 *.log
+
+
+# Added by cargo
+
+/target
