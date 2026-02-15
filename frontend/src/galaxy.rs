@@ -18,7 +18,7 @@ pub struct FileLabel {
     pub offset: Vec3,
 }
 
-/// Calculate position for a node in a galaxy spiral pattern
+/// Calculate position for a node - folders in spiral, files cluster around parent
 pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Vec3 {
     let node = &model.nodes[node_idx];
 
@@ -27,10 +27,9 @@ pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Ve
         return Vec3::new(0.0, 0.0, 0.0);
     }
 
-    // Use golden ratio for spiral distribution
     let golden_ratio = 1.618033988749;
 
-    // Use node index for consistent positioning
+    // Get index within parent's children
     let index_in_parent = if let Some(parent_idx) = node.parent {
         model.nodes[parent_idx]
             .children
@@ -41,18 +40,39 @@ pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Ve
         0
     };
 
-    // Create spiral arms based on depth
-    let angle = (node_idx as f32 * golden_ratio * 2.0 * PI) + (index_in_parent as f32 * 0.5);
-    let radius = (node.depth as f32) * 8.0 + (index_in_parent as f32) * 1.5;
+    if node.is_dir {
+        // Directories: spiral pattern based on depth
+        let angle = (node_idx as f32 * golden_ratio * 2.0 * PI) + (index_in_parent as f32 * 0.5);
+        let radius = (node.depth as f32) * 8.0 + (index_in_parent as f32) * 1.5;
+        let y = (node.depth as f32) * 2.0 - 5.0;
 
-    // Add some vertical spread based on depth
-    let y = (node.depth as f32) * 2.0 - 5.0;
+        let x = radius * angle.cos();
+        let z = radius * angle.sin();
 
-    // Spiral coordinates
-    let x = radius * angle.cos();
-    let z = radius * angle.sin();
+        Vec3::new(x, y, z)
+    } else {
+        // Files: cluster around and below parent folder
+        if let Some(parent_idx) = node.parent {
+            let parent_pos = calculate_galaxy_position(model, parent_idx);
 
-    Vec3::new(x, y, z)
+            // Distribute files in a circle around parent
+            let angle = index_in_parent as f32 * golden_ratio * 2.0 * PI;
+            let cluster_radius = 2.0; // How far from parent
+
+            let offset_x = cluster_radius * angle.cos();
+            let offset_z = cluster_radius * angle.sin();
+            let offset_y = -1.5 - (index_in_parent as f32 * 0.2).min(2.0); // Below parent
+
+            Vec3::new(
+                parent_pos.x + offset_x,
+                parent_pos.y + offset_y,
+                parent_pos.z + offset_z,
+            )
+        } else {
+            // Fallback if no parent (shouldn't happen)
+            Vec3::new(0.0, -5.0, 0.0)
+        }
+    }
 }
 
 /// Calculate star size based on node properties
@@ -66,25 +86,27 @@ pub fn calculate_star_size(node: &FileNode) -> f32 {
     }
 }
 
-/// Calculate star color based on node properties
+/// Calculate star color based on node properties - HackMIT color scheme
 pub fn calculate_star_color(node: &FileNode) -> Color {
     if node.is_dir {
-        // Directories are blue-white
-        Color::srgb(0.7, 0.8, 1.0)
+        // Directories are warm whitish-yellow
+        Color::srgb(1.0, 0.95, 0.7) // Whitish yellow
     } else {
-        // Files colored by extension
+        // Files colored by extension - pastel but vibrant
         let extension = node.path.extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");
 
         match extension {
-            "rs" => Color::srgb(1.0, 0.6, 0.3),      // Rust - orange
-            "toml" | "yaml" | "yml" | "json" => Color::srgb(0.9, 0.9, 0.5), // Config - yellow
-            "md" | "txt" => Color::srgb(0.8, 0.8, 0.8), // Text - white
-            "js" | "ts" => Color::srgb(0.9, 0.9, 0.3), // JS - bright yellow
-            "py" => Color::srgb(0.3, 0.6, 1.0),      // Python - blue
-            "html" | "css" => Color::srgb(1.0, 0.4, 0.6), // Web - pink
-            _ => Color::srgb(0.6, 0.6, 0.7),         // Unknown - gray
+            "rs" => Color::srgb(1.0, 0.75, 0.6),      // Rust - pastel coral
+            "toml" | "yaml" | "yml" | "json" => Color::srgb(1.0, 0.95, 0.6), // Config - pastel yellow
+            "md" | "txt" => Color::srgb(0.9, 0.8, 1.0), // Text - pastel lavender
+            "js" | "ts" => Color::srgb(1.0, 0.98, 0.7), // JS - pastel cream yellow
+            "py" => Color::srgb(0.7, 0.85, 1.0),      // Python - pastel sky blue
+            "html" | "css" => Color::srgb(1.0, 0.7, 0.85), // Web - pastel pink
+            "java" | "cpp" | "c" => Color::srgb(0.85, 0.75, 1.0), // Compiled - pastel purple
+            "go" => Color::srgb(0.7, 0.9, 1.0),      // Go - pastel cyan
+            _ => Color::srgb(0.9, 0.8, 0.95),         // Unknown - pastel lilac
         }
     }
 }
@@ -103,16 +125,16 @@ pub fn spawn_star(
     let size = calculate_star_size(node);
     let color = calculate_star_color(node);
 
-    // Create sphere - only directories bloom
+    // Create sphere - both folders and files bloom
     let mesh = meshes.add(Sphere::new(size));
 
-    // Only directories get high emissive for bloom effect
+    // Directories get higher emissive, files get moderate emissive
     let emissive_strength = if node.is_dir {
-        // Directories are bright stars with bloom
-        5.0 + (node.children.len() as f32 * 0.5).min(10.0)
+        // Directories are bright stars with strong bloom
+        6.0 + (node.children.len() as f32 * 0.5).min(10.0)
     } else {
-        // Files have no emissive - no bloom
-        0.0
+        // Files have moderate emissive for subtle bloom
+        2.5
     };
 
     let material = materials.add(StandardMaterial {
