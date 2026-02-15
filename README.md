@@ -4,8 +4,6 @@ A 3D command center for agentic swarms. Renders your codebase as a galaxy and yo
 
 ![Demo Screenshot](Demo.png)
 
-![View Demo on Loom](https://www.loom.com/share/d3304e143ce24ab494c1b86e5716a957)
-
 ---
 
 Built at **TreeHacks 2026!** 🚀
