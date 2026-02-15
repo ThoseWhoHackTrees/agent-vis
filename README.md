@@ -2,7 +2,7 @@
 
 A 3D command center for agentic swarms. Renders your codebase as a galaxy and your AI agents as spaceships navigating it in real time.
 
-![w Screenshot](Welcome-screen.png)
+![Welcome Screenshot](Welcome-screen.png)
 ![Demo Screenshot](Demo.png)
 
 ---
@@ -11,7 +11,7 @@ Built at **TreeHacks 2026!**
 
 ## What it does
 
-Space Agents! visualizes a live codebase as a spiral galaxy: files and directories become stars, and each AI agent is a spaceship flying between them. View what every agent is doing (reading, writing, editing), which files are hot, and how your project is structured at a glance.
+Space Agents! visualizes a live codebase as a spiral galaxy: files and directories become stars, and each AI agent is a spaceship flying between them. View what every agent is doing (reading, writing, editing), which files are hot, and how your project is structured at a glance. Launch and command agents from the interface.
 
 Files are color-coded by type and scaled by size. Agents are labeled and color-matched for tracking. Hover over any star to see recent activity. Zoom, orbit, or let the camera fly on autopilot.
 
