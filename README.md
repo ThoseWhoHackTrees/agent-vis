@@ -50,8 +50,8 @@ git clone <your-repo-url>
 cd agent-vis
 
 # build both
-cd frontend && cargo build --release
-cd ../server && cargo build --release
+cd frontend && cargo build
+cd ../server && cargo build
 ```
 
 ### Run
@@ -60,35 +60,17 @@ cd ../server && cargo build --release
 
 ```bash
 cd server
-cargo run --release
-# listens on http://127.0.0.1:8080
+cargo run
 ```
 
 **2. Start the frontend**
 
 ```bash
 cd frontend
-cargo run --release -- /path/to/your/project
+cargo run -- /path/to/your/project
 ```
 
 This will model the file tree, watch for changes, and connect to the server for agent events.
-
-**3. Connect agents**
-
-Point your AI agents at `http://127.0.0.1:8080`. Supported endpoints:
-
-- `POST /session-start` — agent begins a session
-- `POST /read` — agent reads a file
-- `POST /write` — agent writes a file
-- `POST /edit` — agent edits a file
-
-Example:
-
-```bash
-curl -X POST http://127.0.0.1:8080/session-start \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": "agent-1", "cwd": "/path/to/project", "model": "claude-sonnet-4"}'
-```
 
 ## Controls
 
@@ -108,9 +90,3 @@ cd frontend && cargo run -- /path/to/project
 # verbose logging
 RUST_LOG=debug cargo run -- /path/to/project
 ```
-
-## Notes
-
-- Always use `--release` for smooth performance
-- Requires GPU with OpenGL 3.3+ or Vulkan
-- Respects `.gitignore` when building the file tree
