@@ -20,6 +20,8 @@ pub enum AgentEvent {
         tool_name: String,
         file_path: String,
         #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
         timestamp: Option<String>,
     },
 }

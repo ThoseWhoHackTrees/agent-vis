@@ -41,6 +41,8 @@ struct ToolUsePayload {
     session_id: String,
     tool_name: String,
     tool_input: ToolInput,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 /// Collect all file paths under `root`, respecting .gitignore.
@@ -114,6 +116,7 @@ async fn main() {
                 "session_id": payload.session_id,
                 "tool_name": payload.tool_name,
                 "file_path": payload.tool_input.file_path,
+                "reason": payload.reason,
                 "timestamp": Utc::now().to_rfc3339(),
             })
             .to_string();
@@ -132,6 +135,7 @@ async fn main() {
                 "session_id": payload.session_id,
                 "tool_name": payload.tool_name,
                 "file_path": payload.tool_input.file_path,
+                "reason": payload.reason,
                 "timestamp": Utc::now().to_rfc3339(),
             })
             .to_string();
@@ -150,6 +154,7 @@ async fn main() {
                 "session_id": payload.session_id,
                 "tool_name": payload.tool_name,
                 "file_path": payload.tool_input.file_path,
+                "reason": payload.reason,
                 "timestamp": Utc::now().to_rfc3339(),
             })
             .to_string();
@@ -246,6 +251,80 @@ async fn run_mock_sessions(
     }
 }
 
+/// Generate a human-readable explanation for a tool use action
+fn generate_action_explanation(tool_name: &str, file_path: &str, action_number: u32, total_actions: u32) -> String {
+    use std::path::Path;
+
+    let file_name = Path::new(file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+
+    let ext = Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    // Phase-based explanations
+    let phase_ratio = action_number as f32 / total_actions as f32;
+
+    match tool_name {
+        "Read" => {
+            if phase_ratio < 0.3 {
+                // Early exploration phase
+                vec![
+                    format!("Reading {} to understand the codebase structure", file_name),
+                    format!("Scanning {} to identify dependencies", file_name),
+                    format!("Reviewing {} to understand the current implementation", file_name),
+                    format!("Checking {} for existing patterns and conventions", file_name),
+                    format!("Examining {} to locate the entry point", file_name),
+                ].choose(&mut StdRng::from_os_rng()).unwrap().clone()
+            } else {
+                // Later investigation phase
+                vec![
+                    format!("Reading {} to verify the changes needed", file_name),
+                    format!("Checking {} before making modifications", file_name),
+                    format!("Reviewing {} to ensure compatibility", file_name),
+                    format!("Analyzing {} to understand the impact area", file_name),
+                ].choose(&mut StdRng::from_os_rng()).unwrap().clone()
+            }
+        },
+        "Write" => {
+            if ext == "rs" {
+                vec![
+                    format!("Writing {} to add new functionality", file_name),
+                    format!("Creating {} with the required implementation", file_name),
+                    format!("Writing {} to introduce the new module", file_name),
+                ].choose(&mut StdRng::from_os_rng()).unwrap().clone()
+            } else {
+                vec![
+                    format!("Writing {} to update configuration", file_name),
+                    format!("Creating {} with new settings", file_name),
+                    format!("Writing {} to document the changes", file_name),
+                ].choose(&mut StdRng::from_os_rng()).unwrap().clone()
+            }
+        },
+        "Edit" => {
+            if ext == "rs" {
+                vec![
+                    format!("Editing {} to fix the identified issue", file_name),
+                    format!("Updating {} to improve the implementation", file_name),
+                    format!("Modifying {} to add the requested feature", file_name),
+                    format!("Refactoring {} to follow best practices", file_name),
+                    format!("Editing {} to integrate the new functionality", file_name),
+                ].choose(&mut StdRng::from_os_rng()).unwrap().clone()
+            } else {
+                vec![
+                    format!("Editing {} to update configuration", file_name),
+                    format!("Updating {} to fix inconsistencies", file_name),
+                    format!("Modifying {} to align with requirements", file_name),
+                ].choose(&mut StdRng::from_os_rng()).unwrap().clone()
+            }
+        },
+        _ => format!("{} {}", tool_name, file_name),
+    }
+}
+
 /// Simulates a single agent session: start → several tool uses → end.
 async fn run_single_session(
     tx: broadcast::Sender<String>,
@@ -294,6 +373,9 @@ async fn run_single_session(
 
         let path = files.choose(&mut rng).unwrap();
 
+        // Generate explanation for this action
+        let explanation = generate_action_explanation(tool, path, i, num_actions);
+
         // Occasionally have a "thinking" pause (longer delay), otherwise quick succession
         let delay = if rng.random::<f32>() < 0.3 {
             *long_delays.choose(&mut rng).unwrap()
@@ -307,6 +389,7 @@ async fn run_single_session(
             "session_id": session_id,
             "tool_name": tool,
             "file_path": path,
+            "reason": explanation,
             "timestamp": Utc::now().to_rfc3339(),
         })
         .to_string();
