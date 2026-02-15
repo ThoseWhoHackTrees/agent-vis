@@ -1,3 +1,4 @@
+use chrono::Utc;
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use ignore::WalkBuilder;
@@ -113,6 +114,7 @@ async fn main() {
                 "session_id": payload.session_id,
                 "tool_name": payload.tool_name,
                 "file_path": payload.tool_input.file_path,
+                "timestamp": Utc::now().to_rfc3339(),
             })
             .to_string();
             println!("[Read] {}", msg);
@@ -130,6 +132,7 @@ async fn main() {
                 "session_id": payload.session_id,
                 "tool_name": payload.tool_name,
                 "file_path": payload.tool_input.file_path,
+                "timestamp": Utc::now().to_rfc3339(),
             })
             .to_string();
             println!("[Write] {}", msg);
@@ -147,6 +150,7 @@ async fn main() {
                 "session_id": payload.session_id,
                 "tool_name": payload.tool_name,
                 "file_path": payload.tool_input.file_path,
+                "timestamp": Utc::now().to_rfc3339(),
             })
             .to_string();
             println!("[Edit] {}", msg);
@@ -303,6 +307,7 @@ async fn run_single_session(
             "session_id": session_id,
             "tool_name": tool,
             "file_path": path,
+            "timestamp": Utc::now().to_rfc3339(),
         })
         .to_string();
         println!("[mock] {}", tool_msg);
