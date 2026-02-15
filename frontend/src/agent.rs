@@ -63,7 +63,7 @@ const SPAWN_DURATION: f32 = 0.5;
 const DESPAWN_DURATION: f32 = 0.5;
 const IDLE_TIMEOUT: f32 = 5.0;
 const MOVE_SPEED: f32 = 1.2; // seconds per move
-const AGENT_SCALE: f32 = 0.15;
+const AGENT_SCALE: f32 = 100.0;
 
 // Ease-in-out cubic
 fn ease_in_out_cubic(t: f32) -> f32 {
@@ -100,6 +100,17 @@ fn spawn_agent_entity(
         .with_children(|parent| {
             // Spawn the GLB scene as a child
             parent.spawn(SceneRoot(spaceship_scene));
+
+            // Add a bright point light to make the spaceship more visible
+            parent.spawn((
+                PointLight {
+                    color: Color::srgb(0.9, 0.95, 1.0), // Cool white/blue light
+                    intensity: 5000000.0,
+                    range: 50.0,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
         })
         .id();
 

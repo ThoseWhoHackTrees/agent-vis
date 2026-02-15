@@ -2,6 +2,7 @@
 mod agent;
 mod fs_model;
 mod galaxy;
+mod planet_material;
 mod watcher;
 mod ws_client;
 
@@ -19,6 +20,9 @@ struct AmbientStar {
     speed: f32,
     color_offset: f32,
 }
+
+#[derive(Component)]
+struct OrbitCircle;
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
 use galaxy::{FileLabel, spawn_star};
@@ -106,7 +110,7 @@ fn main() {
         .add_message::<AgentArrivedEvent>()
         .add_systems(
             Startup,
-            (setup_camera, setup_lighting, setup_galaxy, setup_ui, setup_ambient_stars),
+            (setup_camera, setup_lighting, setup_galaxy, setup_ui, setup_ambient_stars, setup_orbit_circles),
         )
         .add_systems(
             Update,
@@ -264,6 +268,36 @@ fn animate_ambient_stars(
             material.base_color = color;
             material.emissive = LinearRgba::from(color) * 0.3;
         }
+    }
+}
+
+fn setup_orbit_circles(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Create orbit circles at various radii
+    let radii = [10.0, 15.0, 20.0, 28.0, 35.0, 45.0, 60.0];
+
+    for &radius in &radii {
+        // Create a torus with very thin cross-section to look like a circle
+        let torus = Torus {
+            minor_radius: 0.02,
+            major_radius: radius,
+        };
+
+        commands.spawn((
+            OrbitCircle,
+            Mesh3d(meshes.add(torus)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            })),
+            // Position at y=0 with no rotation - torus should be horizontal by default
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
     }
 }
 
