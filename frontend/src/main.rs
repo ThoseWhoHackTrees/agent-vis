@@ -442,22 +442,27 @@ fn update_file_system(
 
 fn handle_camera_mode_buttons(
     mut controller: ResMut<CameraController>,
-    mut interaction_query: Query<
-        (&Interaction, &CameraModeButton, &mut BackgroundColor),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &CameraModeButton), Changed<Interaction>>,
+    mut all_buttons: Query<(&CameraModeButton, &Interaction, &mut BackgroundColor)>,
 ) {
-    for (interaction, button, mut bg_color) in interaction_query.iter_mut() {
+    // Check for button presses
+    for (interaction, button) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            controller.mode = button.mode;
+        }
+    }
+
+    // Update all button colors based on current mode
+    for (button, interaction, mut bg_color) in all_buttons.iter_mut() {
         match *interaction {
-            Interaction::Pressed => {
-                controller.mode = button.mode;
-            }
             Interaction::Hovered => {
                 if controller.mode != button.mode {
                     *bg_color = BackgroundColor(Color::srgb(0.3, 0.3, 0.3));
+                } else {
+                    *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.8));
                 }
             }
-            Interaction::None => {
+            Interaction::Pressed | Interaction::None => {
                 if controller.mode == button.mode {
                     *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.8));
                 } else {
