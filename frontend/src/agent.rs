@@ -74,12 +74,43 @@ fn ease_in_out_cubic(t: f32) -> f32 {
     }
 }
 
+// Helper function to spawn an agent with spaceship model
+fn spawn_agent_entity(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    session_id: String,
+    event_queue: VecDeque<AgentAction>,
+) -> Entity {
+    // Load the spaceship GLB scene
+    let spaceship_scene = asset_server.load("low_poly_spaceships.glb#Scene0");
+
+    // Create parent entity with Agent component
+    let agent_entity = commands
+        .spawn((
+            Agent {
+                session_id,
+                event_queue,
+                state: AgentState::Spawning { timer: 0.0 },
+                current_target_file: None,
+            },
+            Transform::from_translation(Vec3::ZERO)
+                .with_scale(Vec3::ZERO)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), // Rotate to face forward
+        ))
+        .with_children(|parent| {
+            // Spawn the GLB scene as a child
+            parent.spawn(SceneRoot(spaceship_scene));
+        })
+        .id();
+
+    agent_entity
+}
+
 // --- System 1: Process WebSocket events ---
 
 pub fn process_ws_events(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
     ws_state: Res<WsClientState>,
     fs_state: Res<FileSystemState>,
     mut registry: ResMut<AgentRegistry>,
@@ -102,27 +133,12 @@ pub fn process_ws_events(
 
                 println!("[agent] Spawning agent for session {}", session_id);
 
-                let mesh = meshes.add(Sphere::new(AGENT_SCALE));
-                let material = materials.add(StandardMaterial {
-                    base_color: Color::srgb(1.0, 0.1, 0.1),
-                    emissive: LinearRgba::new(8.0, 0.5, 0.5, 1.0),
-                    ..default()
-                });
-
-                let entity = commands
-                    .spawn((
-                        Agent {
-                            session_id: session_id.clone(),
-                            event_queue: VecDeque::new(),
-                            state: AgentState::Spawning { timer: 0.0 },
-                            current_target_file: None,
-                        },
-                        Mesh3d(mesh),
-                        MeshMaterial3d(material),
-                        Transform::from_translation(Vec3::ZERO)
-                            .with_scale(Vec3::ZERO),
-                    ))
-                    .id();
+                let entity = spawn_agent_entity(
+                    &mut commands,
+                    &asset_server,
+                    session_id.clone(),
+                    VecDeque::new(),
+                );
 
                 registry.map.insert(session_id, entity);
             }
@@ -161,12 +177,6 @@ pub fn process_ws_events(
                             "[agent] Auto-spawning agent for session {} (tool_use)",
                             session_id
                         );
-                        let mesh = meshes.add(Sphere::new(AGENT_SCALE));
-                        let material = materials.add(StandardMaterial {
-                            base_color: Color::srgb(1.0, 0.1, 0.1),
-                            emissive: LinearRgba::new(8.0, 0.5, 0.5, 1.0),
-                            ..default()
-                        });
 
                         let mut queue = VecDeque::new();
                         queue.push_back(AgentAction::MoveTo {
@@ -174,20 +184,12 @@ pub fn process_ws_events(
                             node_index: node_idx,
                         });
 
-                        let entity = commands
-                            .spawn((
-                                Agent {
-                                    session_id: session_id.clone(),
-                                    event_queue: queue,
-                                    state: AgentState::Spawning { timer: 0.0 },
-                                    current_target_file: None,
-                                },
-                                Mesh3d(mesh),
-                                MeshMaterial3d(material),
-                                Transform::from_translation(Vec3::ZERO)
-                                    .with_scale(Vec3::ZERO),
-                            ))
-                            .id();
+                        let entity = spawn_agent_entity(
+                            &mut commands,
+                            &asset_server,
+                            session_id.clone(),
+                            queue,
+                        );
 
                         registry.map.insert(session_id, entity);
                         Some(entity)
@@ -330,6 +332,14 @@ pub fn agent_transform_system(mut agents: Query<(&Agent, &mut Transform)>) {
                 let t = ease_in_out_cubic(*progress);
                 transform.translation = from.lerp(*to, t);
                 transform.scale = Vec3::splat(AGENT_SCALE);
+
+                // Make spaceship face movement direction
+                let direction = (*to - *from).normalize();
+                if direction.length_squared() > 0.001 {
+                    // Calculate rotation to face direction (assuming spaceship faces +Z by default)
+                    let target_rotation = Quat::from_rotation_arc(Vec3::Z, direction);
+                    transform.rotation = target_rotation;
+                }
             }
             AgentState::Despawning { timer } => {
                 let t = (*timer / DESPAWN_DURATION).clamp(0.0, 1.0);
