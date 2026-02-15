@@ -143,7 +143,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "File System Galaxy".to_string(),
+                title: "Space Agents!".to_string(),
                 resolution: WindowResolution::new(1920, 1080),
                 ..default()
             }),

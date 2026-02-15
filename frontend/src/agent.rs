@@ -33,6 +33,7 @@ pub struct Agent {
     pub current_target_file: Option<usize>,
     pub current_action: Option<String>, // Description of what the agent is doing
     pub color: Color, // Unique color for this agent (used for UI and spaceship)
+    pub greek_symbol: String, // Greek letter (α, β, γ, etc.)
 }
 
 // --- Resources ---
@@ -40,6 +41,7 @@ pub struct Agent {
 #[derive(Resource, Default)]
 pub struct AgentRegistry {
     pub map: HashMap<String, Entity>,
+    pub session_id_order: Vec<String>, // Track order of agents for Greek letter assignment
 }
 
 #[derive(Resource)]
@@ -114,6 +116,9 @@ const ACTION_BUBBLE_PADDING: f32 = 0.35;
 const ACTION_BUBBLE_HEIGHT: f32 = 0.55;
 const ACTION_BUBBLE_Y_OFFSET: f32 = 3.6;
 const NAMEPLATE_Y_OFFSET: f32 = 2.6;
+
+const GREEK_SYMBOLS: &[&str] = &["α", "β", "γ", "δ", "ε", "ζ", "η", "θ", "ι", "κ", "λ", "μ",
+                                  "ν", "ξ", "ο", "π", "ρ", "σ", "τ", "υ", "φ", "χ", "ψ", "ω"];
 
 // Ease-in-out cubic
 fn ease_in_out_cubic(t: f32) -> f32 {
@@ -191,6 +196,7 @@ fn spawn_agent_entity(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     session_id: String,
     event_queue: VecDeque<AgentAction>,
+    greek_symbol: String,
 ) -> Entity {
     // Load the spaceship GLB scene
     let spaceship_scene = asset_server.load("spaceships.glb#Scene0");
@@ -199,7 +205,7 @@ fn spawn_agent_entity(
     let agent_color = generate_agent_color(&session_id);
 
     // Create parent entity with Agent component
-    let name_text = format!("Agent {}", abbreviate_session_id(&session_id));
+    let name_text = format!("Agent {}", greek_symbol);
     let agent_entity = commands
         .spawn((
             Agent {
@@ -209,10 +215,12 @@ fn spawn_agent_entity(
                 current_target_file: None,
                 current_action: None,
                 color: agent_color,
+                greek_symbol,
             },
             Transform::from_translation(Vec3::new(0.0, 15.0, 0.0))
                 .with_scale(Vec3::ZERO)
                 .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), // Rotate to face forward
+            Visibility::default(),
             UnprocessedSpaceship, // Mark for material processing
         ))
         .with_children(|parent| {
@@ -346,6 +354,9 @@ pub fn process_ws_events(
 
                 println!("[agent] Spawning agent for session {}", session_id);
 
+                // Assign Greek symbol based on order
+                let greek_symbol = GREEK_SYMBOLS[registry.session_id_order.len() % GREEK_SYMBOLS.len()].to_string();
+
                 let entity = spawn_agent_entity(
                     &mut commands,
                     &asset_server,
@@ -353,8 +364,10 @@ pub fn process_ws_events(
                     &mut materials,
                     session_id.clone(),
                     VecDeque::new(),
+                    greek_symbol,
                 );
 
+                registry.session_id_order.push(session_id.clone());
                 registry.map.insert(session_id, entity);
             }
             AgentEvent::ToolUse {
@@ -431,6 +444,9 @@ pub fn process_ws_events(
                             node_index: node_idx,
                         });
 
+                        // Assign Greek symbol based on order
+                        let greek_symbol = GREEK_SYMBOLS[registry.session_id_order.len() % GREEK_SYMBOLS.len()].to_string();
+
                         let entity = spawn_agent_entity(
                             &mut commands,
                             &asset_server,
@@ -438,8 +454,10 @@ pub fn process_ws_events(
                             &mut materials,
                             session_id.clone(),
                             queue,
+                            greek_symbol,
                         );
 
+                        registry.session_id_order.push(session_id.clone());
                         registry.map.insert(session_id.clone(), entity);
                         Some(entity)
                     };
@@ -451,10 +469,7 @@ pub fn process_ws_events(
                         }
                     }
                 } else {
-                    println!(
-                        "[agent] File not in galaxy, skipping: {}",
-                        file_path
-                    );
+                    // File is outside the watched directory — silently skip
                 }
             }
         }
