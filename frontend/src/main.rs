@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use bevy_fontmesh::FontMeshPlugin;
 use crossbeam_channel::Receiver;
-use fs_model::{FileSystemModel, GitignoreChecker};
+use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
 use galaxy::{spawn_star, FileLabel};
 use std::collections::HashMap;
 use std::env;
@@ -27,6 +27,7 @@ struct FileSystemState {
     event_receiver: Receiver<FileSystemEvent>,
     entity_map: HashMap<usize, Entity>, // node_index -> Entity
     gitignore_checker: GitignoreChecker,
+    root_path: PathBuf,
     _watcher_handle: watcher::FileWatcherHandle,
 }
 
@@ -143,6 +144,7 @@ fn setup_galaxy(
     let gitignore_checker = GitignoreChecker::new(&watch_path);
 
     // Start file watcher
+    let root_path = watch_path.clone();
     let (rx, handle) = start_file_watcher(watch_path.clone());
     let handle = watch_directory(handle, watch_path);
 
@@ -158,8 +160,27 @@ fn setup_galaxy(
         event_receiver: rx,
         entity_map,
         gitignore_checker,
+        root_path,
         _watcher_handle: handle,
     });
+}
+
+fn is_gitignore_file(path: &PathBuf) -> bool {
+    path.file_name().map(|n| n == ".gitignore").unwrap_or(false)
+}
+
+fn despawn_star_with_label(
+    commands: &mut Commands,
+    star_entity: Entity,
+    label_query: &Query<(Entity, &FileLabel)>,
+) {
+    commands.entity(star_entity).despawn();
+    for (label_entity, file_label) in label_query.iter() {
+        if file_label.star_entity == star_entity {
+            commands.entity(label_entity).despawn();
+            break;
+        }
+    }
 }
 
 fn update_file_system(
@@ -168,11 +189,18 @@ fn update_file_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    label_query: Query<(Entity, &FileLabel)>,
 ) {
+    let mut gitignore_changed = false;
+
     // Process all pending file system events
     while let Ok(event) = fs_state.event_receiver.try_recv() {
         match event {
             FileSystemEvent::Created(path, is_dir) => {
+                if is_gitignore_file(&path) {
+                    gitignore_changed = true;
+                }
+
                 // Skip if ignored by gitignore
                 if fs_state.gitignore_checker.is_ignored(&path) {
                     continue;
@@ -181,7 +209,6 @@ fn update_file_system(
                 println!("Created: {} ({})", path.display(), if is_dir { "dir" } else { "file" });
 
                 if let Some(node_idx) = fs_state.model.add_node(path, is_dir) {
-                    // Spawn new star
                     let entity = spawn_star(
                         &mut commands,
                         &mut meshes,
@@ -194,28 +221,67 @@ fn update_file_system(
                 }
             }
             FileSystemEvent::Deleted(path) => {
-                // Skip if ignored by gitignore
-                if fs_state.gitignore_checker.is_ignored(&path) {
-                    continue;
+                if is_gitignore_file(&path) {
+                    gitignore_changed = true;
                 }
 
                 println!("Deleted: {}", path.display());
 
+                // Always process deletions — the file may have been in the model
                 if let Some(node_idx) = fs_state.model.remove_node(&path) {
-                    // Despawn star
                     if let Some(entity) = fs_state.entity_map.remove(&node_idx) {
-                        commands.entity(entity).despawn();
+                        despawn_star_with_label(&mut commands, entity, &label_query);
                     }
                 }
             }
             FileSystemEvent::Modified(path) => {
-                // Skip if ignored by gitignore
-                if fs_state.gitignore_checker.is_ignored(&path) {
-                    continue;
+                if is_gitignore_file(&path) {
+                    gitignore_changed = true;
                 }
 
                 println!("Modified: {}", path.display());
-                // Could update star appearance here
+            }
+        }
+    }
+
+    // When .gitignore changes, reconcile: remove now-ignored files, add now-visible files
+    if gitignore_changed {
+        println!("Gitignore changed, reconciling visualization...");
+        let valid_paths = get_valid_paths(&fs_state.root_path);
+
+        // Remove stars for paths that are now gitignored
+        let paths_to_remove: Vec<PathBuf> = fs_state
+            .model
+            .path_to_index
+            .keys()
+            .filter(|p| !valid_paths.contains(*p))
+            .cloned()
+            .collect();
+
+        for path in &paths_to_remove {
+            println!("Removing now-ignored: {}", path.display());
+            if let Some(node_idx) = fs_state.model.remove_node(path) {
+                if let Some(entity) = fs_state.entity_map.remove(&node_idx) {
+                    despawn_star_with_label(&mut commands, entity, &label_query);
+                }
+            }
+        }
+
+        // Add stars for paths that are now visible (were previously ignored)
+        for path in &valid_paths {
+            if !fs_state.model.path_to_index.contains_key(path) {
+                let is_dir = path.is_dir();
+                if let Some(node_idx) = fs_state.model.add_node(path.clone(), is_dir) {
+                    let entity = spawn_star(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &asset_server,
+                        &fs_state.model,
+                        node_idx,
+                    );
+                    fs_state.entity_map.insert(node_idx, entity);
+                }
             }
         }
     }
