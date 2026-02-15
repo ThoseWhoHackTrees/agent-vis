@@ -434,9 +434,12 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(10.0),
                 padding: UiRect::all(Val::Px(20.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            BackgroundColor(Color::srgba(0.03, 0.01, 0.08, 0.92)),
+            BorderColor::all(Color::srgba(0.4, 0.3, 0.7, 0.3)),
         ))
         .with_children(|parent| {
             // Title
@@ -466,7 +469,7 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                                 border: UiRect::all(Val::Px(2.0)),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgb(0.3, 0.5, 0.8)),
+                            BackgroundColor(Color::srgb(0.6, 0.45, 0.7)),
                             BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
                             CameraModeButton {
                                 mode: CameraMode::Auto,
@@ -542,9 +545,12 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 align_items: AlignItems::Start,
                 row_gap: Val::Px(8.0),
                 padding: UiRect::all(Val::Px(20.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            BackgroundColor(Color::srgba(0.03, 0.01, 0.08, 0.92)),
+            BorderColor::all(Color::srgba(0.4, 0.3, 0.7, 0.3)),
             AgentActionsContainer,
         ));
 
@@ -559,9 +565,12 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 align_items: AlignItems::Start,
                 row_gap: Val::Px(4.0),
                 padding: UiRect::all(Val::Px(20.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            BackgroundColor(Color::srgba(0.03, 0.01, 0.08, 0.92)),
+            BorderColor::all(Color::srgba(0.4, 0.3, 0.7, 0.3)),
             FileStatsContainer,
         ));
 
@@ -601,9 +610,12 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 align_items: AlignItems::Start,
                 row_gap: Val::Px(4.0),
                 padding: UiRect::all(Val::Px(20.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            BackgroundColor(Color::srgba(0.03, 0.01, 0.08, 0.92)),
+            BorderColor::all(Color::srgba(0.4, 0.3, 0.7, 0.3)),
             ColorLegendContainer,
         ))
         .with_children(|parent| {
@@ -828,12 +840,12 @@ fn handle_camera_mode_buttons(
                 if controller.mode != button.mode {
                     *bg_color = BackgroundColor(Color::srgb(0.3, 0.3, 0.3));
                 } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.8));
+                    *bg_color = BackgroundColor(Color::srgb(0.6, 0.45, 0.7));
                 }
             }
             Interaction::Pressed | Interaction::None => {
                 if controller.mode == button.mode {
-                    *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.8));
+                    *bg_color = BackgroundColor(Color::srgb(0.6, 0.45, 0.7));
                 } else {
                     *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.2));
                 }
