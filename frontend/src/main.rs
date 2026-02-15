@@ -828,12 +828,12 @@ fn update_agent_actions_display(
         }
     }
 
-    // Collect all active agents with their actions
-    let mut agent_actions: Vec<(String, String)> = agents
+    // Collect all active agents with their actions and colors
+    let mut agent_actions: Vec<(String, String, Color)> = agents
         .iter()
         .filter_map(|agent| {
             agent.current_action.as_ref().map(|action| {
-                (agent.session_id.clone(), action.clone())
+                (agent.session_id.clone(), action.clone(), agent.color)
             })
         })
         .collect();
@@ -858,7 +858,6 @@ fn update_agent_actions_display(
 
     // Add a text entity for each active action
     commands.entity(container).with_children(|parent| {
-        // Title
         // Title in white
         parent.spawn((
             Text::new("Agent Activity"),
@@ -869,58 +868,16 @@ fn update_agent_actions_display(
             TextColor(Color::WHITE),
         ));
 
-        // Action list - each agent gets a unique color
-        for (session_id, action) in agent_actions.iter() {
-            let color = generate_agent_color(session_id);
+        // Action list - each agent uses their unique color
+        for (_session_id, action, color) in agent_actions.iter() {
             parent.spawn((
                 Text::new(format!("• {}", action)),
                 TextFont {
                     font_size: action_font_size,
                     ..default()
                 },
-                TextColor(color),
+                TextColor(*color),
             ));
         }
     });
-}
-
-// Generate a consistent color for an agent based on their session_id
-fn generate_agent_color(session_id: &str) -> Color {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    session_id.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    // Use hash to generate vibrant, distinguishable colors
-    let hue = (hash % 360) as f32;
-    let saturation = 0.7 + ((hash >> 8) % 30) as f32 / 100.0; // 0.7-1.0
-    let lightness = 0.6 + ((hash >> 16) % 20) as f32 / 100.0; // 0.6-0.8
-
-    // Convert HSL to RGB
-    hsl_to_rgb(hue, saturation, lightness)
-}
-
-// Convert HSL to RGB color
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
-    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
-    let m = l - c / 2.0;
-
-    let (r, g, b) = if h < 60.0 {
-        (c, x, 0.0)
-    } else if h < 120.0 {
-        (x, c, 0.0)
-    } else if h < 180.0 {
-        (0.0, c, x)
-    } else if h < 240.0 {
-        (0.0, x, c)
-    } else if h < 300.0 {
-        (x, 0.0, c)
-    } else {
-        (c, 0.0, x)
-    };
-
-    Color::srgb(r + m, g + m, b + m)
 }

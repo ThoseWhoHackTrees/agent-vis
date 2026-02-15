@@ -30,6 +30,7 @@ pub struct Agent {
     pub state: AgentState,
     pub current_target_file: Option<usize>,
     pub current_action: Option<String>, // Description of what the agent is doing
+    pub color: Color, // Unique color for this agent (used for UI and spaceship)
 }
 
 // --- Resources ---
@@ -80,6 +81,47 @@ fn ease_in_out_cubic(t: f32) -> f32 {
     }
 }
 
+// Generate a consistent color for an agent based on their session_id
+pub fn generate_agent_color(session_id: &str) -> Color {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Use hash to generate vibrant, distinguishable colors
+    let hue = (hash % 360) as f32;
+    let saturation = 0.7 + ((hash >> 8) % 30) as f32 / 100.0; // 0.7-1.0
+    let lightness = 0.6 + ((hash >> 16) % 20) as f32 / 100.0; // 0.6-0.8
+
+    // Convert HSL to RGB
+    hsl_to_rgb(hue, saturation, lightness)
+}
+
+// Convert HSL to RGB color
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+
+    let (r, g, b) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    Color::srgb(r + m, g + m, b + m)
+}
+
 // Helper function to spawn an agent with spaceship model
 fn spawn_agent_entity(
     commands: &mut Commands,
@@ -90,6 +132,9 @@ fn spawn_agent_entity(
     // Load the spaceship GLB scene
     let spaceship_scene = asset_server.load("low_poly_spaceships.glb#Scene0");
 
+    // Generate consistent color for this agent
+    let agent_color = generate_agent_color(&session_id);
+
     // Create parent entity with Agent component
     let agent_entity = commands
         .spawn((
@@ -99,6 +144,7 @@ fn spawn_agent_entity(
                 state: AgentState::Spawning { timer: 0.0 },
                 current_target_file: None,
                 current_action: None,
+                color: agent_color,
             },
             Transform::from_translation(Vec3::new(0.0, 15.0, 0.0))
                 .with_scale(Vec3::ZERO)
@@ -459,32 +505,37 @@ pub fn file_highlight_system(
 
 pub fn process_spaceship_materials(
     mut commands: Commands,
-    unprocessed: Query<(Entity, &Children), With<UnprocessedSpaceship>>,
+    unprocessed: Query<(Entity, &Children, &Agent), With<UnprocessedSpaceship>>,
     children_query: Query<&Children>,
-    mesh_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut mesh_query: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (entity, children) in unprocessed.iter() {
+    for (entity, children, agent) in unprocessed.iter() {
+        // Get the agent's unique color
+        let agent_color = LinearRgba::from(agent.color);
+
         // Recursively traverse all descendants
         let mut stack: Vec<Entity> = children.to_vec();
         let mut processed_any = false;
 
         while let Some(child) = stack.pop() {
             // Check if this child has a material
-            if let Ok(mat_handle) = mesh_query.get(child) {
-                if let Some(material) = materials.get_mut(mat_handle) {
-                    // Make the spaceship unlit so it's not affected by scene lighting
-                    material.unlit = true;
+            if let Ok(mut mat_handle) = mesh_query.get_mut(child) {
+                if let Some(original_material) = materials.get(&mat_handle.0) {
+                    // Clone the material to create a unique instance for this agent
+                    let mut new_material = original_material.clone();
 
-                    // Make it bright like the stars using emissive
-                    let current_color = material.base_color;
-                    let color_linear = LinearRgba::from(current_color);
+                    // Make the spaceship unlit so it's not affected by scene lighting
+                    new_material.unlit = true;
+
+                    // Set the base color to the agent's color
+                    new_material.base_color = agent.color;
 
                     // Set emissive to make it glow, but reduce bloom on very bright parts (antennae)
                     // If the material already had high emissive (antennae), reduce it to 3x
                     // Otherwise use 5x for the body to make it bright
                     let current_emissive_intensity =
-                        material.emissive.red.max(material.emissive.green).max(material.emissive.blue);
+                        new_material.emissive.red.max(new_material.emissive.green).max(new_material.emissive.blue);
 
                     let emissive_multiplier = if current_emissive_intensity > 5.0 {
                         // This is likely an antenna or other glowing part - tone it down
@@ -494,7 +545,11 @@ pub fn process_spaceship_materials(
                         8.0
                     };
 
-                    material.emissive = color_linear * emissive_multiplier;
+                    new_material.emissive = agent_color * emissive_multiplier;
+
+                    // Add the new material to assets and update the entity to use it
+                    let new_handle = materials.add(new_material);
+                    mat_handle.0 = new_handle;
 
                     processed_any = true;
                 }
