@@ -1,5 +1,7 @@
 // hello world
 use bevy::prelude::*;
+use bevy::math::primitives::Rectangle;
+use bevy_fontmesh::{TextMesh, TextMeshBundle, TextMeshStyle};
 use crossbeam_channel::Receiver;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -81,6 +83,24 @@ pub struct FileHighlight {
 #[derive(Component)]
 pub struct UnprocessedSpaceship;
 
+#[derive(Component)]
+pub struct AgentNameplate {
+    pub agent_entity: Entity,
+    pub offset: Vec3,
+}
+
+#[derive(Component)]
+pub struct AgentActionBubble {
+    pub agent_entity: Entity,
+    pub offset: Vec3,
+}
+
+#[derive(Component)]
+pub struct AgentActionText;
+
+#[derive(Component)]
+pub struct AgentActionBackground;
+
 // --- Constants ---
 
 const SPAWN_DURATION: f32 = 0.5;
@@ -88,6 +108,12 @@ const DESPAWN_DURATION: f32 = 0.5;
 const IDLE_TIMEOUT: f32 = 5.0;
 const MOVE_SPEED: f32 = 1.2; // seconds per move
 const AGENT_SCALE: f32 = 100.0;
+const NAMEPLATE_SCALE: f32 = 0.35;
+const ACTION_TEXT_SCALE: f32 = 0.24;
+const ACTION_BUBBLE_PADDING: f32 = 0.35;
+const ACTION_BUBBLE_HEIGHT: f32 = 0.55;
+const ACTION_BUBBLE_Y_OFFSET: f32 = 3.6;
+const NAMEPLATE_Y_OFFSET: f32 = 2.6;
 
 // Ease-in-out cubic
 fn ease_in_out_cubic(t: f32) -> f32 {
@@ -96,6 +122,24 @@ fn ease_in_out_cubic(t: f32) -> f32 {
     } else {
         1.0 - (-2.0 * t + 2.0_f32).powi(3) / 2.0
     }
+}
+
+fn abbreviate_session_id(session_id: &str) -> String {
+    let trimmed = session_id.trim();
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= 10 {
+        trimmed.to_string()
+    } else {
+        let start: String = chars.iter().take(4).collect();
+        let end: String = chars.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+        format!("{start}...{end}")
+    }
+}
+
+fn bubble_width_for_text(text: &str) -> f32 {
+    let char_count = text.chars().count().max(1) as f32;
+    let text_width = char_count * ACTION_TEXT_SCALE * 0.55;
+    (text_width + ACTION_BUBBLE_PADDING * 2.0).max(1.2)
 }
 
 // Generate a consistent color for an agent based on their session_id
@@ -143,6 +187,8 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
 fn spawn_agent_entity(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
     session_id: String,
     event_queue: VecDeque<AgentAction>,
 ) -> Entity {
@@ -153,6 +199,7 @@ fn spawn_agent_entity(
     let agent_color = generate_agent_color(&session_id);
 
     // Create parent entity with Agent component
+    let name_text = format!("Agent {}", abbreviate_session_id(&session_id));
     let agent_entity = commands
         .spawn((
             Agent {
@@ -185,6 +232,87 @@ fn spawn_agent_entity(
         })
         .id();
 
+    commands.spawn((
+        TextMeshBundle {
+            text_mesh: TextMesh {
+                text: name_text,
+                    font: asset_server.load("fonts/FiraMono-Medium.ttf"),
+                    style: TextMeshStyle {
+                        depth: 0.2,
+                        subdivision: 8,
+                        ..default()
+                    },
+                },
+                material: MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: agent_color,
+                    emissive: LinearRgba::from(agent_color) * 0.8,
+                    unlit: true,
+                    ..default()
+                })),
+                transform: Transform::from_translation(Vec3::new(0.0, NAMEPLATE_Y_OFFSET, 0.0))
+                    .with_scale(Vec3::splat(NAMEPLATE_SCALE)),
+                ..default()
+        },
+        AgentNameplate {
+            agent_entity,
+            offset: Vec3::new(0.0, NAMEPLATE_Y_OFFSET, 0.0),
+        },
+    ));
+
+    let bubble_width = bubble_width_for_text("Waiting...");
+    let bubble_background_mesh = meshes.add(Rectangle::new(1.0, 1.0));
+    let bubble_background_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.02, 0.02, 0.06, 0.72),
+        emissive: LinearRgba::from(Color::srgba(0.04, 0.04, 0.12, 0.7)),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+
+    commands
+        .spawn((
+            AgentActionBubble {
+                agent_entity,
+                offset: Vec3::new(0.0, ACTION_BUBBLE_Y_OFFSET, 0.0),
+            },
+            Transform::from_translation(Vec3::new(0.0, ACTION_BUBBLE_Y_OFFSET, 0.0)),
+            Visibility::Hidden,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Mesh3d(bubble_background_mesh),
+                MeshMaterial3d(bubble_background_material),
+                Transform::from_translation(Vec3::new(0.0, -0.05, -0.2))
+                    .with_scale(Vec3::new(bubble_width, ACTION_BUBBLE_HEIGHT, 1.0)),
+                AgentActionBackground,
+            ));
+
+            parent.spawn((
+                TextMeshBundle {
+                    text_mesh: TextMesh {
+                        text: "Waiting...".to_string(),
+                        font: asset_server.load("fonts/FiraMono-Medium.ttf"),
+                        style: TextMeshStyle {
+                            depth: 0.2,
+                            subdivision: 8,
+                            ..default()
+                        },
+                    },
+                    material: MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::WHITE,
+                        emissive: LinearRgba::from(Color::WHITE) * 0.2,
+                        unlit: true,
+                        ..default()
+                    })),
+                    transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.1))
+                        .with_scale(Vec3::splat(ACTION_TEXT_SCALE)),
+                    ..default()
+                },
+                AgentActionText,
+            ));
+        })
+        .id();
+
     agent_entity
 }
 
@@ -193,6 +321,8 @@ fn spawn_agent_entity(
 pub fn process_ws_events(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     ws_state: Res<WsClientState>,
     fs_state: Res<FileSystemState>,
     mut registry: ResMut<AgentRegistry>,
@@ -219,6 +349,8 @@ pub fn process_ws_events(
                 let entity = spawn_agent_entity(
                     &mut commands,
                     &asset_server,
+                    &mut meshes,
+                    &mut materials,
                     session_id.clone(),
                     VecDeque::new(),
                 );
@@ -302,6 +434,8 @@ pub fn process_ws_events(
                         let entity = spawn_agent_entity(
                             &mut commands,
                             &asset_server,
+                            &mut meshes,
+                            &mut materials,
                             session_id.clone(),
                             queue,
                         );
@@ -594,6 +728,109 @@ pub fn process_spaceship_materials(
         // Remove the marker component once we've processed materials
         if processed_any {
             commands.entity(entity).remove::<UnprocessedSpaceship>();
+        }
+    }
+}
+
+pub fn update_agent_nameplates(
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    agents: Query<&GlobalTransform, With<Agent>>,
+    mut nameplates: Query<(&mut Transform, &AgentNameplate)>,
+) {
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+    let (_, camera_rotation, _) = camera_transform.to_scale_rotation_translation();
+
+    for (mut transform, nameplate) in nameplates.iter_mut() {
+        if let Ok(agent_transform) = agents.get(nameplate.agent_entity) {
+            transform.translation = agent_transform.translation() + nameplate.offset;
+            transform.rotation = camera_rotation;
+        }
+    }
+}
+
+pub fn update_agent_action_bubble_transforms(
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    agents: Query<(&Agent, &GlobalTransform)>,
+    mut bubbles: Query<(&AgentActionBubble, &mut Visibility, &mut Transform)>,
+) {
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+    let (_, camera_rotation, _) = camera_transform.to_scale_rotation_translation();
+
+    for (bubble, mut visibility, mut bubble_transform) in bubbles.iter_mut() {
+        let Ok((agent, agent_transform)) = agents.get(bubble.agent_entity) else {
+            continue;
+        };
+
+        if agent.current_action.is_some() {
+            *visibility = Visibility::Visible;
+            bubble_transform.translation = agent_transform.translation() + bubble.offset;
+            bubble_transform.rotation = camera_rotation;
+        } else {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+pub fn update_agent_action_bubble_content(
+    agents: Query<&Agent>,
+    bubbles: Query<(&AgentActionBubble, &Children)>,
+    mut text_query: Query<&mut TextMesh, With<AgentActionText>>,
+    mut bg_query: Query<&mut Transform, With<AgentActionBackground>>,
+) {
+    for (bubble, children) in bubbles.iter() {
+        let Ok(agent) = agents.get(bubble.agent_entity) else {
+            continue;
+        };
+
+        let Some(action) = agent.current_action.as_deref() else {
+            continue;
+        };
+
+        let width = bubble_width_for_text(action);
+
+        for child in children.iter() {
+            if let Ok(mut text_mesh) = text_query.get_mut(child) {
+                if text_mesh.text != action {
+                    text_mesh.text = action.to_string();
+                }
+            }
+            if let Ok(mut bg_transform) = bg_query.get_mut(child) {
+                bg_transform.scale = Vec3::new(width, ACTION_BUBBLE_HEIGHT, 1.0);
+            }
+        }
+    }
+}
+
+pub fn cleanup_agent_labels(
+    mut commands: Commands,
+    agents: Query<Entity, With<Agent>>,
+    nameplates: Query<(Entity, &AgentNameplate)>,
+    bubbles: Query<(Entity, &AgentActionBubble)>,
+    children_query: Query<&Children>,
+) {
+    for (entity, nameplate) in nameplates.iter() {
+        if agents.get(nameplate.agent_entity).is_err() {
+            if let Ok(children) = children_query.get(entity) {
+                for child in children.iter() {
+                    commands.entity(child).despawn();
+                }
+            }
+            commands.entity(entity).despawn();
+        }
+    }
+
+    for (entity, bubble) in bubbles.iter() {
+        if agents.get(bubble.agent_entity).is_err() {
+            if let Ok(children) = children_query.get(entity) {
+                for child in children.iter() {
+                    commands.entity(child).despawn();
+                }
+            }
+            commands.entity(entity).despawn();
         }
     }
 }

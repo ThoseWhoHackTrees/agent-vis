@@ -8,12 +8,17 @@ mod ws_client;
 
 use agent::{
     AgentArrivedEvent, AgentRegistry, FileEventHistory, HoveredFile, WsClientState,
-    agent_despawn_system, agent_state_machine, agent_transform_system, file_highlight_system,
-    on_file_star_out, on_file_star_over, process_spaceship_materials, process_ws_events,
+    agent_despawn_system, agent_state_machine, agent_transform_system, cleanup_agent_labels,
+    file_highlight_system, on_file_star_out, on_file_star_over, process_spaceship_materials,
+    process_ws_events, update_agent_action_bubble_content, update_agent_action_bubble_transforms,
+    update_agent_nameplates,
 };
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
+use bevy::post_process::effect_stack::ChromaticAberration;
 use bevy::prelude::*;
+use bevy::asset::RenderAssetUsages;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::WindowResolution;
 use bevy_fontmesh::FontMeshPlugin;
 
@@ -172,7 +177,15 @@ fn main() {
         .add_observer(on_file_star_out)
         .add_systems(
             Startup,
-            (setup_camera, setup_lighting, setup_galaxy, setup_ui, setup_ambient_stars, setup_orbit_circles),
+            (
+                setup_camera,
+                setup_lighting,
+                setup_galaxy,
+                setup_ui,
+                setup_vignette,
+                setup_ambient_stars,
+                setup_orbit_circles,
+            ),
         )
         .add_systems(
             Update,
@@ -182,6 +195,10 @@ fn main() {
                 update_camera,
                 handle_manual_camera_input,
                 billboard_labels,
+                update_agent_nameplates,
+                update_agent_action_bubble_transforms,
+                update_agent_action_bubble_content,
+                cleanup_agent_labels,
                 update_agent_actions_display,
                 update_file_stats_display,
                 track_file_visits,
@@ -218,6 +235,11 @@ fn setup_camera(mut commands: Commands) {
                 threshold: 1.5, // Lower threshold so files can bloom too
                 threshold_softness: 0.5,
             },
+            ..default()
+        },
+        ChromaticAberration {
+            intensity: 0.008,
+            max_samples: 6,
             ..default()
         },
     ));
@@ -423,7 +445,7 @@ fn setup_orbit_circles(
     }
 }
 
-fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
+fn setup_ui(mut commands: Commands, _fs_state: Res<FileSystemState>) {
     // Root UI container in bottom left
     commands
         .spawn((
@@ -672,6 +694,25 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 });
             }
         });
+}
+
+fn setup_vignette(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    let vignette = create_vignette_image(256, 0.55, 0.6);
+    let handle = images.add(vignette);
+
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            ..default()
+        },
+        ImageNode::new(handle),
+        GlobalZIndex(-1),
+        Pickable::IGNORE,
+    ));
 }
 
 fn setup_galaxy(
@@ -1157,6 +1198,35 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
     };
 
     Color::srgb(r + m, g + m, b + m)
+}
+
+fn create_vignette_image(size: u32, inner_radius: f32, strength: f32) -> Image {
+    let mut data = Vec::with_capacity((size * size * 4) as usize);
+    let denom = (size - 1).max(1) as f32;
+
+    for y in 0..size {
+        for x in 0..size {
+            let nx = (x as f32 / denom) * 2.0 - 1.0;
+            let ny = (y as f32 / denom) * 2.0 - 1.0;
+            let dist = (nx * nx + ny * ny).sqrt();
+            let edge = ((dist - inner_radius) / (1.0 - inner_radius)).clamp(0.0, 1.0);
+            let alpha = (edge * edge * strength).clamp(0.0, 1.0);
+            let a = (alpha * 255.0) as u8;
+            data.extend_from_slice(&[0, 0, 0, a]);
+        }
+    }
+
+    Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+    )
 }
 
 fn ease_out_cubic(t: f32) -> f32 {
