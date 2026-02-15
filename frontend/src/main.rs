@@ -1,18 +1,26 @@
+// hello world
+mod agent;
 mod fs_model;
 mod galaxy;
 mod watcher;
+mod ws_client;
 
+use agent::{
+    AgentArrivedEvent, AgentRegistry, WsClientState, agent_despawn_system, agent_state_machine,
+    agent_transform_system, file_highlight_system, process_ws_events,
+};
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
-use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy_fontmesh::FontMeshPlugin;
 use crossbeam_channel::Receiver;
-use fs_model::{FileSystemModel, GitignoreChecker};
-use galaxy::{spawn_star, FileLabel};
+use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
+use galaxy::{FileLabel, spawn_star};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
-use watcher::{start_file_watcher, watch_directory, FileSystemEvent};
+use watcher::{FileSystemEvent, start_file_watcher, watch_directory};
+use ws_client::start_ws_client;
 
 #[derive(Component)]
 struct CameraModeButton {
@@ -25,6 +33,7 @@ struct FileSystemState {
     event_receiver: Receiver<FileSystemEvent>,
     entity_map: HashMap<usize, Entity>, // node_index -> Entity
     gitignore_checker: GitignoreChecker,
+    root_path: PathBuf,
     _watcher_handle: watcher::FileWatcherHandle,
 }
 
@@ -64,6 +73,9 @@ fn main() {
 
     println!("Watching directory: {}", watch_path.display());
 
+    // Start WebSocket client
+    let (ws_rx, _ws_handle) = start_ws_client();
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -83,12 +95,31 @@ fn main() {
             is_dragging: false,
             last_mouse_pos: None,
         })
-        .add_systems(Startup, (setup_camera, setup_lighting, setup_galaxy, setup_ui))
-        .add_systems(Update, update_file_system)
-        .add_systems(Update, handle_camera_mode_buttons)
-        .add_systems(Update, update_camera)
-        .add_systems(Update, handle_manual_camera_input)
-        .add_systems(Update, billboard_labels)
+        .insert_resource(WsClientState { receiver: ws_rx })
+        .insert_resource(AgentRegistry::default())
+        .add_message::<AgentArrivedEvent>()
+        .add_systems(
+            Startup,
+            (setup_camera, setup_lighting, setup_galaxy, setup_ui),
+        )
+        .add_systems(
+            Update,
+            (
+                update_file_system,
+                handle_camera_mode_buttons,
+                update_camera,
+                handle_manual_camera_input,
+                billboard_labels,
+                (
+                    process_ws_events,
+                    agent_state_machine,
+                    agent_transform_system,
+                    agent_despawn_system,
+                    file_highlight_system,
+                )
+                    .chain(),
+            ),
+        )
         .run();
 }
 
@@ -147,77 +178,85 @@ fn setup_ui(mut commands: Commands) {
             ));
 
             // Button container
-            parent.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(10.0),
-                ..default()
-            }).with_children(|buttons| {
-                // Auto button
-                buttons
-                    .spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::all(Val::Px(10.0)),
-                            border: UiRect::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.3, 0.5, 0.8)),
-                        BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
-                        CameraModeButton { mode: CameraMode::Auto },
-                    ))
-                    .with_child((
-                        Text::new("Auto"),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                })
+                .with_children(|buttons| {
+                    // Auto button
+                    buttons
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.3, 0.5, 0.8)),
+                            BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
+                            CameraModeButton {
+                                mode: CameraMode::Auto,
+                            },
+                        ))
+                        .with_child((
+                            Text::new("Auto"),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
 
-                // Manual button
-                buttons
-                    .spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::all(Val::Px(10.0)),
-                            border: UiRect::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-                        BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
-                        CameraModeButton { mode: CameraMode::Manual },
-                    ))
-                    .with_child((
-                        Text::new("Manual"),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                    // Manual button
+                    buttons
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+                            BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
+                            CameraModeButton {
+                                mode: CameraMode::Manual,
+                            },
+                        ))
+                        .with_child((
+                            Text::new("Manual"),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
 
-                // Follow button
-                buttons
-                    .spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::all(Val::Px(10.0)),
-                            border: UiRect::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-                        BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
-                        CameraModeButton { mode: CameraMode::Follow },
-                    ))
-                    .with_child((
-                        Text::new("Follow"),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-            });
+                    // Follow button
+                    buttons
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+                            BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
+                            CameraModeButton {
+                                mode: CameraMode::Follow,
+                            },
+                        ))
+                        .with_child((
+                            Text::new("Follow"),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+                });
         });
 }
 
@@ -247,13 +286,21 @@ fn setup_galaxy(
     let gitignore_checker = GitignoreChecker::new(&watch_path);
 
     // Start file watcher
+    let root_path = watch_path.clone();
     let (rx, handle) = start_file_watcher(watch_path.clone());
     let handle = watch_directory(handle, watch_path);
 
     // Spawn initial galaxy
     let mut entity_map = HashMap::new();
     for node_idx in 0..model.total_nodes() {
-        let entity = spawn_star(&mut commands, &mut meshes, &mut materials, &asset_server, &model, node_idx);
+        let entity = spawn_star(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &asset_server,
+            &model,
+            node_idx,
+        );
         entity_map.insert(node_idx, entity);
     }
 
@@ -262,8 +309,27 @@ fn setup_galaxy(
         event_receiver: rx,
         entity_map,
         gitignore_checker,
+        root_path,
         _watcher_handle: handle,
     });
+}
+
+fn is_gitignore_file(path: &PathBuf) -> bool {
+    path.file_name().map(|n| n == ".gitignore").unwrap_or(false)
+}
+
+fn despawn_star_with_label(
+    commands: &mut Commands,
+    star_entity: Entity,
+    label_query: &Query<(Entity, &FileLabel)>,
+) {
+    commands.entity(star_entity).despawn();
+    for (label_entity, file_label) in label_query.iter() {
+        if file_label.star_entity == star_entity {
+            commands.entity(label_entity).despawn();
+            break;
+        }
+    }
 }
 
 fn update_file_system(
@@ -272,20 +338,30 @@ fn update_file_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    label_query: Query<(Entity, &FileLabel)>,
 ) {
+    let mut gitignore_changed = false;
+
     // Process all pending file system events
     while let Ok(event) = fs_state.event_receiver.try_recv() {
         match event {
             FileSystemEvent::Created(path, is_dir) => {
+                if is_gitignore_file(&path) {
+                    gitignore_changed = true;
+                }
+
                 // Skip if ignored by gitignore
                 if fs_state.gitignore_checker.is_ignored(&path) {
                     continue;
                 }
 
-                println!("Created: {} ({})", path.display(), if is_dir { "dir" } else { "file" });
+                println!(
+                    "Created: {} ({})",
+                    path.display(),
+                    if is_dir { "dir" } else { "file" }
+                );
 
                 if let Some(node_idx) = fs_state.model.add_node(path, is_dir) {
-                    // Spawn new star
                     let entity = spawn_star(
                         &mut commands,
                         &mut meshes,
@@ -298,28 +374,67 @@ fn update_file_system(
                 }
             }
             FileSystemEvent::Deleted(path) => {
-                // Skip if ignored by gitignore
-                if fs_state.gitignore_checker.is_ignored(&path) {
-                    continue;
+                if is_gitignore_file(&path) {
+                    gitignore_changed = true;
                 }
 
                 println!("Deleted: {}", path.display());
 
+                // Always process deletions — the file may have been in the model
                 if let Some(node_idx) = fs_state.model.remove_node(&path) {
-                    // Despawn star
                     if let Some(entity) = fs_state.entity_map.remove(&node_idx) {
-                        commands.entity(entity).despawn();
+                        despawn_star_with_label(&mut commands, entity, &label_query);
                     }
                 }
             }
             FileSystemEvent::Modified(path) => {
-                // Skip if ignored by gitignore
-                if fs_state.gitignore_checker.is_ignored(&path) {
-                    continue;
+                if is_gitignore_file(&path) {
+                    gitignore_changed = true;
                 }
 
                 println!("Modified: {}", path.display());
-                // Could update star appearance here
+            }
+        }
+    }
+
+    // When .gitignore changes, reconcile: remove now-ignored files, add now-visible files
+    if gitignore_changed {
+        println!("Gitignore changed, reconciling visualization...");
+        let valid_paths = get_valid_paths(&fs_state.root_path);
+
+        // Remove stars for paths that are now gitignored
+        let paths_to_remove: Vec<PathBuf> = fs_state
+            .model
+            .path_to_index
+            .keys()
+            .filter(|p| !valid_paths.contains(*p))
+            .cloned()
+            .collect();
+
+        for path in &paths_to_remove {
+            println!("Removing now-ignored: {}", path.display());
+            if let Some(node_idx) = fs_state.model.remove_node(path) {
+                if let Some(entity) = fs_state.entity_map.remove(&node_idx) {
+                    despawn_star_with_label(&mut commands, entity, &label_query);
+                }
+            }
+        }
+
+        // Add stars for paths that are now visible (were previously ignored)
+        for path in &valid_paths {
+            if !fs_state.model.path_to_index.contains_key(path) {
+                let is_dir = path.is_dir();
+                if let Some(node_idx) = fs_state.model.add_node(path.clone(), is_dir) {
+                    let entity = spawn_star(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &asset_server,
+                        &fs_state.model,
+                        node_idx,
+                    );
+                    fs_state.entity_map.insert(node_idx, entity);
+                }
             }
         }
     }

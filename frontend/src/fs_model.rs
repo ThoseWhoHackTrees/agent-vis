@@ -1,33 +1,46 @@
-use std::collections::HashMap;
+// hello world
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use ignore::{WalkBuilder, gitignore::GitignoreBuilder};
+use std::process::{Command, Stdio};
+use ignore::WalkBuilder;
 
 pub struct GitignoreChecker {
-    matcher: Option<ignore::gitignore::Gitignore>,
+    root_path: PathBuf,
 }
 
 impl GitignoreChecker {
     pub fn new(root_path: &PathBuf) -> Self {
-        let mut builder = GitignoreBuilder::new(root_path);
-
-        // Add .gitignore if it exists
-        let gitignore_path = root_path.join(".gitignore");
-        if gitignore_path.exists() {
-            builder.add(gitignore_path);
+        Self {
+            root_path: root_path.clone(),
         }
-
-        let matcher = builder.build().ok();
-
-        Self { matcher }
     }
 
+    /// Check if a path is ignored by git, using `git check-ignore`.
+    /// This handles all .gitignore files (nested, global, .git/info/exclude).
     pub fn is_ignored(&self, path: &PathBuf) -> bool {
-        if let Some(ref matcher) = self.matcher {
-            matcher.matched(path, path.is_dir()).is_ignore()
-        } else {
-            false
-        }
+        Command::new("git")
+            .args(["check-ignore", "-q"])
+            .arg(path)
+            .current_dir(&self.root_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
+}
+
+/// Get the set of all non-ignored paths under root using WalkBuilder.
+pub fn get_valid_paths(root_path: &PathBuf) -> HashSet<PathBuf> {
+    WalkBuilder::new(root_path)
+        .hidden(false)
+        .git_ignore(true)
+        .git_exclude(true)
+        .follow_links(false)
+        .build()
+        .filter_map(|r| r.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect()
 }
 
 #[derive(Debug, Clone)]

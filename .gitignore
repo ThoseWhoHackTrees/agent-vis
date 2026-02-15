@@ -20,3 +20,4 @@ hooks/session_output.log
 
 /target
 .git
+*.tmp
