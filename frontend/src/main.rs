@@ -43,6 +43,9 @@ struct CameraModeButton {
     mode: CameraMode,
 }
 
+#[derive(Component)]
+struct AgentActionsContainer;
+
 #[derive(Resource)]
 struct FileSystemState {
     model: FileSystemModel,
@@ -126,6 +129,7 @@ fn main() {
                 update_camera,
                 handle_manual_camera_input,
                 billboard_labels,
+                update_agent_actions_display,
                 (
                     process_ws_events,
                     agent_state_machine,
@@ -465,6 +469,23 @@ fn setup_ui(mut commands: Commands) {
                         ));
                 });
         });
+
+    // Agent actions display at the top left
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(20.0),
+                left: Val::Px(20.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Start,
+                row_gap: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            AgentActionsContainer,
+        ));
 }
 
 fn setup_galaxy(
@@ -681,7 +702,7 @@ fn handle_camera_mode_buttons(
 }
 
 fn update_camera(
-    time: Res<Time>,
+    _time: Res<Time>,
     controller: Res<CameraController>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,
 ) {
@@ -778,4 +799,127 @@ fn billboard_labels(
             label_transform.rotation = camera_rotation;
         }
     }
+}
+
+fn update_agent_actions_display(
+    mut commands: Commands,
+    agents: Query<&agent::Agent>,
+    container_query: Query<Entity, With<AgentActionsContainer>>,
+    children_query: Query<&Children>,
+    windows: Query<&Window>,
+) {
+    // Get the container entity
+    let Ok(container) = container_query.single() else {
+        return;
+    };
+
+    // Get window size for responsive text
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let base_font_size = (window.width() / 80.0).clamp(14.0, 24.0);
+    let title_font_size = base_font_size * 1.5;
+    let action_font_size = base_font_size * 0.75;
+
+    // Despawn all existing child text entities
+    if let Ok(children) = children_query.get(container) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    // Collect all active agents with their actions
+    let mut agent_actions: Vec<(String, String)> = agents
+        .iter()
+        .filter_map(|agent| {
+            agent.current_action.as_ref().map(|action| {
+                (agent.session_id.clone(), action.clone())
+            })
+        })
+        .collect();
+
+    // If there are no active actions, show a placeholder
+    if agent_actions.is_empty() {
+        commands.entity(container).with_children(|parent| {
+            parent.spawn((
+                Text::new("No active agents"),
+                TextFont {
+                    font_size: action_font_size,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+            ));
+        });
+        return;
+    }
+
+    // Sort by session_id for consistent ordering
+    agent_actions.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Add a text entity for each active action
+    commands.entity(container).with_children(|parent| {
+        // Title
+        parent.spawn((
+            Text::new("Agent Activity"),
+            TextFont {
+                font_size: title_font_size,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 1.0, 0.3)),
+        ));
+
+        // Action list - each agent gets a unique color
+        for (session_id, action) in agent_actions.iter() {
+            let color = generate_agent_color(session_id);
+            parent.spawn((
+                Text::new(format!("• {}", action)),
+                TextFont {
+                    font_size: action_font_size,
+                    ..default()
+                },
+                TextColor(color),
+            ));
+        }
+    });
+}
+
+// Generate a consistent color for an agent based on their session_id
+fn generate_agent_color(session_id: &str) -> Color {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Use hash to generate vibrant, distinguishable colors
+    let hue = (hash % 360) as f32;
+    let saturation = 0.7 + ((hash >> 8) % 30) as f32 / 100.0; // 0.7-1.0
+    let lightness = 0.6 + ((hash >> 16) % 20) as f32 / 100.0; // 0.6-0.8
+
+    // Convert HSL to RGB
+    hsl_to_rgb(hue, saturation, lightness)
+}
+
+// Convert HSL to RGB color
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+
+    let (r, g, b) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    Color::srgb(r + m, g + m, b + m)
 }
