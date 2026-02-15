@@ -13,6 +13,12 @@ use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use bevy_fontmesh::FontMeshPlugin;
+
+#[derive(Component)]
+struct AmbientStar {
+    speed: f32,
+    color_offset: f32,
+}
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
 use galaxy::{FileLabel, spawn_star};
@@ -86,7 +92,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(FontMeshPlugin)
-        .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.02)))
+        .insert_resource(ClearColor(Color::srgb(0.05, 0.02, 0.15))) // Deep purple background
         .insert_resource(CameraController {
             mode: CameraMode::Auto,
             orbit_distance: 40.0,
@@ -100,7 +106,7 @@ fn main() {
         .add_message::<AgentArrivedEvent>()
         .add_systems(
             Startup,
-            (setup_camera, setup_lighting, setup_galaxy, setup_ui),
+            (setup_camera, setup_lighting, setup_galaxy, setup_ui, setup_ambient_stars),
         )
         .add_systems(
             Update,
@@ -118,6 +124,7 @@ fn main() {
                     file_highlight_system,
                 )
                     .chain(),
+                animate_ambient_stars,
             ),
         )
         .run();
@@ -147,12 +154,117 @@ fn setup_lighting(mut commands: Commands) {
     // Dim directional light to let stars bloom
     commands.spawn((
         DirectionalLight {
-            illuminance: 1000.0,
+            illuminance: 800.0,
             shadows_enabled: false,
             ..default()
         },
         Transform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+
+    // Add ambient colored point lights for gradient feel
+    // Pink light from top
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(1.0, 0.3, 0.7),
+            intensity: 100000.0,
+            range: 100.0,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 30.0, 0.0),
+    ));
+
+    // Blue light from bottom left
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(0.2, 0.5, 1.0),
+            intensity: 80000.0,
+            range: 100.0,
+            ..default()
+        },
+        Transform::from_xyz(-30.0, -10.0, -30.0),
+    ));
+
+    // Purple light from right
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(0.6, 0.2, 0.9),
+            intensity: 90000.0,
+            range: 100.0,
+            ..default()
+        },
+        Transform::from_xyz(30.0, 0.0, 30.0),
+    ));
+}
+
+fn setup_ambient_stars(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Spawn dim colored stars in the background
+    let star_count = 100;
+    let range = 80.0;
+
+    for i in 0..star_count {
+        let t = i as f32 / star_count as f32;
+
+        // Random-ish position using pseudo-random distribution
+        let angle1 = t * std::f32::consts::TAU * 7.0;
+        let angle2 = t * std::f32::consts::TAU * 13.0;
+        let radius = 50.0 + (t * 30.0);
+
+        let x = radius * angle1.cos() * angle2.sin();
+        let y = (t - 0.5) * range * 2.0;
+        let z = radius * angle1.sin() * angle2.cos();
+
+        // Color from palette: pinks, purples, yellows, blues
+        let color_choice = (i % 4) as f32 / 4.0;
+        let base_color = if color_choice < 0.25 {
+            Color::srgb(1.0, 0.4, 0.7) // Pink
+        } else if color_choice < 0.5 {
+            Color::srgb(0.6, 0.3, 1.0) // Purple
+        } else if color_choice < 0.75 {
+            Color::srgb(1.0, 0.9, 0.4) // Yellow
+        } else {
+            Color::srgb(0.4, 0.7, 1.0) // Blue
+        };
+
+        commands.spawn((
+            AmbientStar {
+                speed: 0.3 + t * 0.2,
+                color_offset: t * std::f32::consts::TAU,
+            },
+            Mesh3d(meshes.add(Sphere::new(0.15))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color,
+                emissive: LinearRgba::from(base_color) * 0.3,
+                ..default()
+            })),
+            Transform::from_translation(Vec3::new(x, y, z)),
+        ));
+    }
+}
+
+fn animate_ambient_stars(
+    time: Res<Time>,
+    mut query: Query<(&AmbientStar, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (ambient_star, material_handle) in query.iter_mut() {
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let t = time.elapsed_secs() * ambient_star.speed + ambient_star.color_offset;
+
+            // Cycle through colors smoothly
+            let color = Color::srgb(
+                0.5 + 0.5 * (t).sin(),
+                0.5 + 0.5 * (t + 2.0).sin(),
+                0.5 + 0.5 * (t + 4.0).sin(),
+            );
+
+            material.base_color = color;
+            material.emissive = LinearRgba::from(color) * 0.3;
+        }
+    }
 }
 
 fn setup_ui(mut commands: Commands) {
