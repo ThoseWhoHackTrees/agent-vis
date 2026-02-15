@@ -33,7 +33,7 @@ struct OrbitCircle {
 }
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
-use galaxy::{FileLabel, spawn_star};
+use galaxy::{FileLabel, FileStar, spawn_star};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -50,6 +50,18 @@ struct AgentActionsContainer;
 
 #[derive(Component)]
 struct FileHoverPanel;
+
+#[derive(Component)]
+struct HoverPanelAnim {
+    progress: f32,
+    last_node: Option<usize>,
+}
+
+#[derive(Component)]
+struct HoverGlow {
+    progress: f32,
+    base_emissive: LinearRgba,
+}
 
 #[derive(Resource)]
 struct FileSystemState {
@@ -152,6 +164,7 @@ fn main() {
                     .chain(),
                 animate_ambient_stars,
                 animate_orbit_circles,
+                hover_glow_system,
             ),
         )
         .run();
@@ -506,13 +519,21 @@ fn setup_ui(mut commands: Commands) {
             right: Val::Px(20.0),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Start,
-            row_gap: Val::Px(6.0),
-            padding: UiRect::all(Val::Px(16.0)),
+            row_gap: Val::Px(8.0),
+            padding: UiRect::axes(Val::Px(20.0), Val::Px(14.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(10.0)),
+            min_width: Val::Px(180.0),
             display: Display::None,
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+        BackgroundColor(Color::srgba(0.03, 0.01, 0.08, 0.0)),
+        BorderColor::all(Color::srgba(0.4, 0.3, 0.7, 0.0)),
         FileHoverPanel,
+        HoverPanelAnim {
+            progress: 0.0,
+            last_node: None,
+        },
     ));
 }
 
@@ -953,6 +974,10 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
     Color::srgb(r + m, g + m, b + m)
 }
 
+fn ease_out_cubic(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
+}
+
 fn extract_time_from_rfc3339(ts: &str) -> &str {
     // RFC3339: "2024-01-15T14:30:45.123Z" or "2024-01-15T14:30:45+00:00"
     // Extract HH:MM:SS portion
@@ -979,17 +1004,41 @@ fn tool_color(tool_name: &str) -> Color {
 }
 
 fn update_file_hover_panel(
+    time: Res<Time>,
     mut commands: Commands,
     hovered: Res<HoveredFile>,
     event_history: Res<FileEventHistory>,
     fs_state: Res<FileSystemState>,
-    mut panel_query: Query<(Entity, &mut Node), With<FileHoverPanel>>,
+    mut panel_query: Query<
+        (Entity, &mut Node, &mut BackgroundColor, &mut BorderColor, &mut HoverPanelAnim),
+        With<FileHoverPanel>,
+    >,
     children_query: Query<&Children>,
     windows: Query<&Window>,
 ) {
-    let Ok((panel_entity, mut panel_node)) = panel_query.single_mut() else {
+    let Ok((panel_entity, mut panel_node, mut bg_color, mut border_color, mut anim)) =
+        panel_query.single_mut()
+    else {
         return;
     };
+
+    let dt = time.delta_secs();
+
+    // Track which node to display (keep last hovered for fade-out)
+    if hovered.0.is_some() {
+        anim.last_node = hovered.0;
+    }
+
+    // Animate progress toward target
+    let target = if hovered.0.is_some() { 1.0 } else { 0.0 };
+    let speed = if target > anim.progress { 6.0 } else { 4.0 };
+    if anim.progress < target {
+        anim.progress = (anim.progress + dt * speed).min(1.0);
+    } else if anim.progress > target {
+        anim.progress = (anim.progress - dt * speed).max(0.0);
+    }
+
+    let t = ease_out_cubic(anim.progress);
 
     // Despawn old children
     if let Ok(children) = children_query.get(panel_entity) {
@@ -998,12 +1047,25 @@ fn update_file_hover_panel(
         }
     }
 
-    let Some(node_idx) = hovered.0 else {
+    // Fully hidden
+    if anim.progress <= 0.001 {
         panel_node.display = Display::None;
         return;
-    };
+    }
 
     panel_node.display = Display::Flex;
+
+    // Animate position (subtle slide down on enter)
+    panel_node.top = Val::Px(20.0 + (1.0 - t) * 10.0);
+
+    // Animate background and border alpha
+    *bg_color = BackgroundColor(Color::srgba(0.03, 0.01, 0.08, 0.92 * t));
+    *border_color = BorderColor::all(Color::srgba(0.4, 0.3, 0.7, 0.3 * t));
+
+    // Content
+    let Some(node_idx) = anim.last_node else {
+        return;
+    };
 
     // Get font sizes
     let base_font_size = if let Ok(window) = windows.single() {
@@ -1021,6 +1083,8 @@ fn update_file_hover_panel(
         "Unknown".to_string()
     };
 
+    let alpha = t;
+
     commands.entity(panel_entity).with_children(|parent| {
         // Title: file name
         parent.spawn((
@@ -1029,7 +1093,17 @@ fn update_file_hover_panel(
                 font_size: title_font_size,
                 ..default()
             },
-            TextColor(Color::WHITE),
+            TextColor(Color::srgba(1.0, 1.0, 1.0, alpha)),
+        ));
+
+        // Thin accent separator
+        parent.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(1.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.5, 0.3, 0.8, 0.5 * alpha)),
         ));
 
         // Get events for this file
@@ -1043,7 +1117,9 @@ fn update_file_hover_panel(
                     .map(extract_time_from_rfc3339)
                     .unwrap_or("--:--:--");
 
-                let color = tool_color(&event.tool_name);
+                let base_color = tool_color(&event.tool_name);
+                let srgba = base_color.to_srgba();
+                let color = Color::srgba(srgba.red, srgba.green, srgba.blue, alpha);
                 let label = format!("{} [{}]", event.tool_name, time_str);
 
                 parent.spawn((
@@ -1062,8 +1138,62 @@ fn update_file_hover_panel(
                     font_size: event_font_size,
                     ..default()
                 },
-                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+                TextColor(Color::srgba(0.5, 0.5, 0.5, alpha)),
             ));
         }
     });
+}
+
+fn hover_glow_system(
+    time: Res<Time>,
+    hovered: Res<HoveredFile>,
+    fs_state: Res<FileSystemState>,
+    mut commands: Commands,
+    stars: Query<&MeshMaterial3d<StandardMaterial>, (With<FileStar>, Without<HoverGlow>)>,
+    mut glowing: Query<(Entity, &FileStar, &mut HoverGlow, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let dt = time.delta_secs();
+    let hovered_idx = hovered.0;
+
+    // Add HoverGlow to newly hovered star
+    if let Some(node_idx) = hovered_idx {
+        if let Some(&star_entity) = fs_state.entity_map.get(&node_idx) {
+            if let Ok(mat_handle) = stars.get(star_entity) {
+                if let Some(material) = materials.get(mat_handle) {
+                    commands.entity(star_entity).insert(HoverGlow {
+                        progress: 0.0,
+                        base_emissive: material.emissive,
+                    });
+                }
+            }
+        }
+    }
+
+    // Update all glowing stars
+    for (entity, star, mut glow, mat_handle) in glowing.iter_mut() {
+        let is_hovered = hovered_idx == Some(star.node_index);
+
+        if is_hovered {
+            glow.progress = (glow.progress + dt * 4.0).min(1.0);
+        } else {
+            glow.progress -= dt * 3.0;
+        }
+
+        if glow.progress <= 0.0 {
+            // Restore original emissive and remove
+            if let Some(material) = materials.get_mut(mat_handle) {
+                material.emissive = glow.base_emissive;
+            }
+            commands.entity(entity).remove::<HoverGlow>();
+        } else {
+            // Apply animated glow with subtle pulse
+            if let Some(material) = materials.get_mut(mat_handle) {
+                let t = ease_out_cubic(glow.progress);
+                let pulse = (time.elapsed_secs() * 3.0).sin() * 0.12 + 0.88;
+                let boost = 1.0 + t * 2.5 * pulse;
+                material.emissive = glow.base_emissive * boost;
+            }
+        }
+    }
 }
