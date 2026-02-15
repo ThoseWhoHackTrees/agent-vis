@@ -4,6 +4,7 @@ mod watcher;
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy_fontmesh::FontMeshPlugin;
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker};
@@ -73,7 +74,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(FontMeshPlugin)
-        .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
+        .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.02)))
         .insert_resource(CameraController {
             mode: CameraMode::Auto,
             orbit_distance: 40.0,
@@ -92,18 +93,30 @@ fn main() {
 }
 
 fn setup_camera(mut commands: Commands) {
-    // Spawn 3D camera
+    // Spawn 3D camera with bloom
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Bloom {
+            intensity: 0.2,
+            low_frequency_boost: 0.3,
+            low_frequency_boost_curvature: 0.95,
+            high_pass_frequency: 1.0,
+            composite_mode: BloomCompositeMode::Additive,
+            prefilter: BloomPrefilter {
+                threshold: 3.0, // Only emissive values > 3.0 will bloom
+                threshold_softness: 0.5,
+            },
+            ..default()
+        },
     ));
 }
 
 fn setup_lighting(mut commands: Commands) {
-    // Directional light
+    // Dim directional light to let stars bloom
     commands.spawn((
         DirectionalLight {
-            illuminance: 5000.0,
+            illuminance: 1000.0,
             shadows_enabled: false,
             ..default()
         },

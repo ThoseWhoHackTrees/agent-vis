@@ -102,11 +102,21 @@ pub fn spawn_star(
     let size = calculate_star_size(node);
     let color = calculate_star_color(node);
 
-    // Create glowing sphere
+    // Create sphere - only directories bloom
     let mesh = meshes.add(Sphere::new(size));
+
+    // Only directories get high emissive for bloom effect
+    let emissive_strength = if node.is_dir {
+        // Directories are bright stars with bloom
+        5.0 + (node.children.len() as f32 * 0.5).min(10.0)
+    } else {
+        // Files have no emissive - no bloom
+        0.0
+    };
+
     let material = materials.add(StandardMaterial {
         base_color: color,
-        emissive: LinearRgba::from(color) * 2.0,
+        emissive: LinearRgba::from(color) * emissive_strength,
         ..default()
     });
 
@@ -137,7 +147,6 @@ pub fn spawn_star(
             },
             material: MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                emissive: LinearRgba::from(Color::WHITE) * 2.0,
                 unlit: true,
                 ..default()
             })),
