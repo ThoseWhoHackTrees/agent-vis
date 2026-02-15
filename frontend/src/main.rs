@@ -859,13 +859,14 @@ fn update_agent_actions_display(
     // Add a text entity for each active action
     commands.entity(container).with_children(|parent| {
         // Title
+        // Title in white
         parent.spawn((
             Text::new("Agent Activity"),
             TextFont {
                 font_size: title_font_size,
                 ..default()
             },
-            TextColor(Color::srgb(1.0, 1.0, 0.3)),
+            TextColor(Color::WHITE),
         ));
 
         // Action list - each agent gets a unique color
