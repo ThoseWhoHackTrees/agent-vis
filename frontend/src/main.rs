@@ -6,20 +6,26 @@ mod watcher;
 mod ws_client;
 
 use agent::{
-    agent_despawn_system, agent_state_machine, agent_transform_system, file_highlight_system,
-    process_ws_events, AgentArrivedEvent, AgentRegistry, WsClientState,
+    AgentArrivedEvent, AgentRegistry, WsClientState, agent_despawn_system, agent_state_machine,
+    agent_transform_system, file_highlight_system, process_ws_events,
 };
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use bevy_fontmesh::FontMeshPlugin;
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
-use galaxy::{spawn_star, FileLabel};
+use galaxy::{FileLabel, spawn_star};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
-use watcher::{start_file_watcher, watch_directory, FileSystemEvent};
+use watcher::{FileSystemEvent, start_file_watcher, watch_directory};
 use ws_client::start_ws_client;
+
+#[derive(Component)]
+struct CameraModeButton {
+    mode: CameraMode,
+}
 
 #[derive(Resource)]
 struct FileSystemState {
@@ -31,11 +37,22 @@ struct FileSystemState {
     _watcher_handle: watcher::FileWatcherHandle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CameraMode {
+    Auto,
+    Manual,
+    Follow,
+}
+
 #[derive(Resource)]
 struct CameraController {
+    mode: CameraMode,
     orbit_distance: f32,
     orbit_angle: f32,
     orbit_height: f32,
+    // Manual mode state
+    is_dragging: bool,
+    last_mouse_pos: Option<Vec2>,
 }
 
 fn main() {
@@ -69,21 +86,29 @@ fn main() {
             ..default()
         }))
         .add_plugins(FontMeshPlugin)
-        .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
+        .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.02)))
         .insert_resource(CameraController {
+            mode: CameraMode::Auto,
             orbit_distance: 40.0,
             orbit_angle: 0.0,
             orbit_height: 20.0,
+            is_dragging: false,
+            last_mouse_pos: None,
         })
         .insert_resource(WsClientState { receiver: ws_rx })
         .insert_resource(AgentRegistry::default())
         .add_message::<AgentArrivedEvent>()
-        .add_systems(Startup, (setup_camera, setup_lighting, setup_galaxy))
+        .add_systems(
+            Startup,
+            (setup_camera, setup_lighting, setup_galaxy, setup_ui),
+        )
         .add_systems(
             Update,
             (
                 update_file_system,
-                camera_orbit,
+                handle_camera_mode_buttons,
+                update_camera,
+                handle_manual_camera_input,
                 billboard_labels,
                 (
                     process_ws_events,
@@ -99,23 +124,140 @@ fn main() {
 }
 
 fn setup_camera(mut commands: Commands) {
-    // Spawn 3D camera
+    // Spawn 3D camera with bloom
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Bloom {
+            intensity: 0.2,
+            low_frequency_boost: 0.3,
+            low_frequency_boost_curvature: 0.95,
+            high_pass_frequency: 1.0,
+            composite_mode: BloomCompositeMode::Additive,
+            prefilter: BloomPrefilter {
+                threshold: 3.0, // Only emissive values > 3.0 will bloom
+                threshold_softness: 0.5,
+            },
+            ..default()
+        },
     ));
 }
 
 fn setup_lighting(mut commands: Commands) {
-    // Directional light
+    // Dim directional light to let stars bloom
     commands.spawn((
         DirectionalLight {
-            illuminance: 5000.0,
+            illuminance: 1000.0,
             shadows_enabled: false,
             ..default()
         },
         Transform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+fn setup_ui(mut commands: Commands) {
+    // Root UI container in bottom left
+    commands
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(20.0),
+            bottom: Val::Px(20.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|parent| {
+            // Title
+            parent.spawn((
+                Text::new("Camera Mode"),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+            ));
+
+            // Button container
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                })
+                .with_children(|buttons| {
+                    // Auto button
+                    buttons
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.3, 0.5, 0.8)),
+                            BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
+                            CameraModeButton {
+                                mode: CameraMode::Auto,
+                            },
+                        ))
+                        .with_child((
+                            Text::new("Auto"),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+
+                    // Manual button
+                    buttons
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+                            BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
+                            CameraModeButton {
+                                mode: CameraMode::Manual,
+                            },
+                        ))
+                        .with_child((
+                            Text::new("Manual"),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+
+                    // Follow button
+                    buttons
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(10.0)),
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+                            BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
+                            CameraModeButton {
+                                mode: CameraMode::Follow,
+                            },
+                        ))
+                        .with_child((
+                            Text::new("Follow"),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+                });
+        });
 }
 
 fn setup_galaxy(
@@ -151,7 +293,14 @@ fn setup_galaxy(
     // Spawn initial galaxy
     let mut entity_map = HashMap::new();
     for node_idx in 0..model.total_nodes() {
-        let entity = spawn_star(&mut commands, &mut meshes, &mut materials, &asset_server, &model, node_idx);
+        let entity = spawn_star(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &asset_server,
+            &model,
+            node_idx,
+        );
         entity_map.insert(node_idx, entity);
     }
 
@@ -206,7 +355,11 @@ fn update_file_system(
                     continue;
                 }
 
-                println!("Created: {} ({})", path.display(), if is_dir { "dir" } else { "file" });
+                println!(
+                    "Created: {} ({})",
+                    path.display(),
+                    if is_dir { "dir" } else { "file" }
+                );
 
                 if let Some(node_idx) = fs_state.model.add_node(path, is_dir) {
                     let entity = spawn_star(
@@ -287,20 +440,110 @@ fn update_file_system(
     }
 }
 
-fn camera_orbit(
-    time: Res<Time>,
+fn handle_camera_mode_buttons(
     mut controller: ResMut<CameraController>,
+    mut interaction_query: Query<
+        (&Interaction, &CameraModeButton, &mut BackgroundColor),
+        Changed<Interaction>,
+    >,
+) {
+    for (interaction, button, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                controller.mode = button.mode;
+            }
+            Interaction::Hovered => {
+                if controller.mode != button.mode {
+                    *bg_color = BackgroundColor(Color::srgb(0.3, 0.3, 0.3));
+                }
+            }
+            Interaction::None => {
+                if controller.mode == button.mode {
+                    *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.8));
+                } else {
+                    *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.2));
+                }
+            }
+        }
+    }
+}
+
+fn update_camera(
+    time: Res<Time>,
+    controller: Res<CameraController>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,
 ) {
-    // Slowly orbit camera
-    controller.orbit_angle += time.delta_secs() * 0.1;
+    match controller.mode {
+        CameraMode::Auto | CameraMode::Follow => {
+            // Auto orbit (Follow will do the same for now)
+            let angle = controller.orbit_angle;
+            let x = controller.orbit_distance * angle.cos();
+            let z = controller.orbit_distance * angle.sin();
+            let y = controller.orbit_height;
 
-    let x = controller.orbit_distance * controller.orbit_angle.cos();
-    let z = controller.orbit_distance * controller.orbit_angle.sin();
-    let y = controller.orbit_height;
+            if let Ok(mut transform) = camera_query.single_mut() {
+                *transform = Transform::from_xyz(x, y, z).looking_at(Vec3::ZERO, Vec3::Y);
+            }
+        }
+        CameraMode::Manual => {
+            // Manual mode - camera position is controlled by input
+            let x = controller.orbit_distance * controller.orbit_angle.cos();
+            let z = controller.orbit_distance * controller.orbit_angle.sin();
+            let y = controller.orbit_height;
 
-    if let Ok(mut transform) = camera_query.single_mut() {
-        *transform = Transform::from_xyz(x, y, z).looking_at(Vec3::ZERO, Vec3::Y);
+            if let Ok(mut transform) = camera_query.single_mut() {
+                *transform = Transform::from_xyz(x, y, z).looking_at(Vec3::ZERO, Vec3::Y);
+            }
+        }
+    }
+}
+
+fn handle_manual_camera_input(
+    mut controller: ResMut<CameraController>,
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    // Auto mode updates angle automatically
+    if controller.mode == CameraMode::Auto || controller.mode == CameraMode::Follow {
+        controller.orbit_angle += time.delta_secs() * 0.1;
+        return;
+    }
+
+    // Manual mode controls
+    if controller.mode != CameraMode::Manual {
+        return;
+    }
+
+    // Arrow keys for navigation
+    let move_speed = 20.0 * time.delta_secs();
+    let rotate_speed = 2.0 * time.delta_secs();
+
+    // Up/Down arrows: zoom in/out
+    if keyboard.pressed(KeyCode::ArrowUp) {
+        controller.orbit_distance -= move_speed;
+        controller.orbit_distance = controller.orbit_distance.clamp(10.0, 100.0);
+    }
+    if keyboard.pressed(KeyCode::ArrowDown) {
+        controller.orbit_distance += move_speed;
+        controller.orbit_distance = controller.orbit_distance.clamp(10.0, 100.0);
+    }
+
+    // Left/Right arrows: rotate around
+    if keyboard.pressed(KeyCode::ArrowLeft) {
+        controller.orbit_angle -= rotate_speed;
+    }
+    if keyboard.pressed(KeyCode::ArrowRight) {
+        controller.orbit_angle += rotate_speed;
+    }
+
+    // W/S keys: adjust height
+    if keyboard.pressed(KeyCode::KeyW) {
+        controller.orbit_height += move_speed * 0.5;
+        controller.orbit_height = controller.orbit_height.clamp(5.0, 50.0);
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        controller.orbit_height -= move_speed * 0.5;
+        controller.orbit_height = controller.orbit_height.clamp(5.0, 50.0);
     }
 }
 

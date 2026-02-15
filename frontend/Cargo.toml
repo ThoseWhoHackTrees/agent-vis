@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = {version="0.18.0", features = ["dynamic_linking"]}
+bevy = {version="0.18.0", features = ["dynamic_linking", "bevy_post_process"]}
 bevy_fontmesh = "0.2"
 notify = "7.0"
 crossbeam-channel = "0.5"
