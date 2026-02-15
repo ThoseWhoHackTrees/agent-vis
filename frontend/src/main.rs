@@ -8,7 +8,7 @@ mod ws_client;
 
 use agent::{
     AgentArrivedEvent, AgentRegistry, WsClientState, agent_despawn_system, agent_state_machine,
-    agent_transform_system, file_highlight_system, process_ws_events,
+    agent_transform_system, file_highlight_system, process_spaceship_materials, process_ws_events,
 };
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
@@ -25,7 +25,10 @@ struct AmbientStar {
 }
 
 #[derive(Component)]
-struct OrbitCircle;
+struct OrbitCircle {
+    fade_speed: f32,
+    phase_offset: f32,
+}
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
 use galaxy::{FileLabel, spawn_star};
@@ -129,9 +132,11 @@ fn main() {
                     agent_transform_system,
                     agent_despawn_system,
                     file_highlight_system,
+                    process_spaceship_materials,
                 )
                     .chain(),
                 animate_ambient_stars,
+                animate_orbit_circles,
             ),
         )
         .run();
@@ -289,6 +294,30 @@ fn animate_ambient_stars(
     }
 }
 
+fn animate_orbit_circles(
+    time: Res<Time>,
+    query: Query<(&OrbitCircle, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (orbit_circle, material_handle) in query.iter() {
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let t = time.elapsed_secs() * orbit_circle.fade_speed + orbit_circle.phase_offset;
+
+            // Very gentle fade between almost invisible and barely visible
+            let alpha = 0.005 + 0.01 * (t.sin() * 0.5 + 0.5);
+
+            // Preserve the RGB color, just update alpha
+            let current_color = material.base_color;
+            material.base_color = Color::srgba(
+                current_color.to_srgba().red,
+                current_color.to_srgba().green,
+                current_color.to_srgba().blue,
+                alpha
+            );
+        }
+    }
+}
+
 fn setup_orbit_circles(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -297,7 +326,18 @@ fn setup_orbit_circles(
     // Create orbit circles at various radii
     let radii = [10.0, 15.0, 20.0, 28.0, 35.0, 45.0, 60.0];
 
-    for &radius in &radii {
+    for (i, &radius) in radii.iter().enumerate() {
+        let t = i as f32 / radii.len() as f32;
+
+        // Subtle color variation - pinks, purples, blues
+        let color = if i % 3 == 0 {
+            Color::srgba(1.0, 0.7, 0.9, 0.005) // Soft pink
+        } else if i % 3 == 1 {
+            Color::srgba(0.8, 0.7, 1.0, 0.005) // Soft purple
+        } else {
+            Color::srgba(0.7, 0.9, 1.0, 0.005) // Soft blue
+        };
+
         // Create a torus with very thin cross-section to look like a circle
         let torus = Torus {
             minor_radius: 0.02,
@@ -305,10 +345,13 @@ fn setup_orbit_circles(
         };
 
         commands.spawn((
-            OrbitCircle,
+            OrbitCircle {
+                fade_speed: 0.3 + t * 0.2,
+                phase_offset: t * std::f32::consts::TAU,
+            },
             Mesh3d(meshes.add(torus)),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+                base_color: color,
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()

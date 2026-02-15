@@ -57,6 +57,11 @@ pub struct FileHighlight {
     pub intensity: f32,
 }
 
+// --- Marker for newly spawned spaceships that need material processing ---
+
+#[derive(Component)]
+pub struct UnprocessedSpaceship;
+
 // --- Constants ---
 
 const SPAWN_DURATION: f32 = 0.5;
@@ -96,6 +101,7 @@ fn spawn_agent_entity(
             Transform::from_translation(Vec3::new(0.0, 15.0, 0.0))
                 .with_scale(Vec3::ZERO)
                 .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), // Rotate to face forward
+            UnprocessedSpaceship, // Mark for material processing
         ))
         .with_children(|parent| {
             // Spawn the GLB scene as a child
@@ -417,6 +423,64 @@ pub fn file_highlight_system(
                 let base_linear = LinearRgba::from(base);
                 material.emissive = base_linear * (2.0 + highlight.intensity);
             }
+        }
+    }
+}
+
+// --- System 6: Process spaceship materials ---
+
+pub fn process_spaceship_materials(
+    mut commands: Commands,
+    unprocessed: Query<(Entity, &Children), With<UnprocessedSpaceship>>,
+    children_query: Query<&Children>,
+    mesh_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (entity, children) in unprocessed.iter() {
+        // Recursively traverse all descendants
+        let mut stack: Vec<Entity> = children.to_vec();
+        let mut processed_any = false;
+
+        while let Some(child) = stack.pop() {
+            // Check if this child has a material
+            if let Ok(mat_handle) = mesh_query.get(child) {
+                if let Some(material) = materials.get_mut(mat_handle) {
+                    // Make the spaceship unlit so it's not affected by scene lighting
+                    material.unlit = true;
+
+                    // Make it bright like the stars using emissive
+                    let current_color = material.base_color;
+                    let color_linear = LinearRgba::from(current_color);
+
+                    // Set emissive to make it glow, but reduce bloom on very bright parts (antennae)
+                    // If the material already had high emissive (antennae), reduce it to 3x
+                    // Otherwise use 5x for the body to make it bright
+                    let current_emissive_intensity =
+                        material.emissive.red.max(material.emissive.green).max(material.emissive.blue);
+
+                    let emissive_multiplier = if current_emissive_intensity > 5.0 {
+                        // This is likely an antenna or other glowing part - tone it down
+                        2.0
+                    } else {
+                        // Regular body - make it bright
+                        8.0
+                    };
+
+                    material.emissive = color_linear * emissive_multiplier;
+
+                    processed_any = true;
+                }
+            }
+
+            // Add this child's children to the stack
+            if let Ok(grandchildren) = children_query.get(child) {
+                stack.extend(grandchildren.to_vec());
+            }
+        }
+
+        // Remove the marker component once we've processed materials
+        if processed_any {
+            commands.entity(entity).remove::<UnprocessedSpaceship>();
         }
     }
 }
