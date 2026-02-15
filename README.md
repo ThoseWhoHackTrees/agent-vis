@@ -1,4 +1,4 @@
-# 🌌 Space Agents!
+# Space Agents!
 
 A 3D command center for agentic swarms. Renders your codebase as a galaxy and your AI agents as spaceships navigating it in real time.
 
@@ -7,7 +7,7 @@ A 3D command center for agentic swarms. Renders your codebase as a galaxy and yo
 
 ---
 
-Built at **TreeHacks 2026!** 🚀
+Built at **TreeHacks 2026!**
 
 ## What it does
 
