@@ -60,6 +60,39 @@ struct FileStatsContainer;
 #[derive(Component)]
 struct ColorLegendContainer;
 
+#[derive(Component)]
+struct PromptContainer;
+
+#[derive(Component)]
+struct PromptInputField;
+
+#[derive(Component)]
+struct PromptSubmitButton;
+
+#[derive(Component)]
+struct IdleSpaceship {
+    float_offset: f32,
+    pulse_phase: f32,
+}
+
+#[derive(Resource, Default)]
+struct PromptInputState {
+    text: String,
+    is_focused: bool,
+}
+
+#[derive(Component)]
+struct BlinkingCursor {
+    timer: f32,
+    visible: bool,
+}
+
+#[derive(Resource, Default)]
+struct PendingAgentTask {
+    session_id: Option<String>,
+    task_description: String,
+}
+
 #[derive(Resource, Default)]
 struct FileStats {
     visits: HashMap<PathBuf, usize>,
@@ -174,6 +207,8 @@ fn main() {
         .insert_resource(FileStats::default())
         .insert_resource(FileEventHistory::default())
         .insert_resource(HoveredFile::default())
+        .insert_resource(PromptInputState::default())
+        .insert_resource(PendingAgentTask::default())
         .add_message::<AgentArrivedEvent>()
         .add_observer(on_file_star_over)
         .add_observer(on_file_star_out)
@@ -205,19 +240,34 @@ fn main() {
                 update_file_stats_display,
                 track_file_visits,
                 update_file_hover_panel,
-                (
-                    process_ws_events,
-                    agent_state_machine,
-                    agent_transform_system,
-                    agent_despawn_system,
-                    file_highlight_system,
-                    process_spaceship_materials,
-                )
-                    .chain(),
                 animate_ambient_stars,
                 animate_orbit_circles,
                 hover_glow_system,
             ),
+        )
+        .add_systems(
+            Update,
+            (
+                handle_prompt_focus,
+                handle_prompt_unfocus,
+                handle_prompt_input,
+                handle_prompt_submit,
+                apply_pending_agent_tasks,
+                update_prompt_display,
+                animate_cursor,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                process_ws_events,
+                agent_state_machine,
+                agent_transform_system,
+                agent_despawn_system,
+                file_highlight_system,
+                process_spaceship_materials,
+            )
+                .chain(),
         )
         .run();
 }
@@ -557,6 +607,72 @@ fn setup_ui(mut commands: Commands, _fs_state: Res<FileSystemState>) {
                             TextColor(Color::WHITE),
                         ));
                 });
+        });
+
+    // Prompt interface at the top center
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(20.0),
+                left: Val::Percent(50.0),
+                width: Val::Px(600.0),
+                margin: UiRect::left(Val::Px(-300.0)), // Center by offsetting half width
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                padding: UiRect::all(Val::Px(16.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(12.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.03, 0.01, 0.08, 0.95)),
+            BorderColor::all(Color::srgba(0.6, 0.45, 0.9, 0.5)),
+            PromptContainer,
+        ))
+        .with_children(|parent| {
+            // Input field container
+            parent.spawn((
+                Button, // Make it clickable
+                Node {
+                    flex_grow: 1.0,
+                    padding: UiRect::all(Val::Px(12.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.1, 0.05, 0.15, 0.8)),
+                BorderColor::all(Color::srgba(0.4, 0.3, 0.7, 0.4)),
+                PromptInputField,
+            ))
+            .with_children(|field| {
+                // Text will be added dynamically by update_prompt_display
+                // Cursor will be added dynamically too
+            });
+
+            // Submit button
+            parent.spawn((
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.6, 0.45, 0.9)),
+                BorderColor::all(Color::srgba(0.8, 0.6, 1.0, 0.6)),
+                PromptSubmitButton,
+            ))
+            .with_child((
+                Text::new("Launch"),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
         });
 
     // Agent actions display at the top left
@@ -1480,6 +1596,266 @@ fn hover_glow_system(
                 let pulse = (time.elapsed_secs() * 3.0).sin() * 0.12 + 0.88;
                 let boost = 1.0 + t * 2.5 * pulse;
                 material.emissive = glow.base_emissive * boost;
+            }
+        }
+    }
+}
+
+fn handle_prompt_focus(
+    mut prompt_state: ResMut<PromptInputState>,
+    input_query: Query<&Interaction, (Changed<Interaction>, With<PromptInputField>)>,
+) {
+    for interaction in input_query.iter() {
+        if *interaction == Interaction::Pressed {
+            prompt_state.is_focused = true;
+        }
+    }
+}
+
+fn handle_prompt_unfocus(
+    mut prompt_state: ResMut<PromptInputState>,
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    input_query: Query<&Interaction, With<PromptInputField>>,
+) {
+    // If user clicks and it's not on the input field, unfocus
+    if mouse_button.just_pressed(MouseButton::Left) {
+        if let Ok(interaction) = input_query.single() {
+            // If interaction is None, the click was outside the input field
+            if *interaction == Interaction::None && prompt_state.is_focused {
+                prompt_state.is_focused = false;
+            }
+        }
+    }
+}
+
+fn handle_prompt_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut prompt_state: ResMut<PromptInputState>,
+) {
+    // Only handle input when focused
+    if !prompt_state.is_focused {
+        return;
+    }
+
+    // Handle backspace
+    if keyboard.just_pressed(KeyCode::Backspace) {
+        prompt_state.text.pop();
+    }
+
+    // Handle character input - basic alphanumeric and common punctuation
+    for key in keyboard.get_just_pressed() {
+        let char_to_add = match key {
+            KeyCode::Space => Some(' '),
+            KeyCode::KeyA => Some('a'),
+            KeyCode::KeyB => Some('b'),
+            KeyCode::KeyC => Some('c'),
+            KeyCode::KeyD => Some('d'),
+            KeyCode::KeyE => Some('e'),
+            KeyCode::KeyF => Some('f'),
+            KeyCode::KeyG => Some('g'),
+            KeyCode::KeyH => Some('h'),
+            KeyCode::KeyI => Some('i'),
+            KeyCode::KeyJ => Some('j'),
+            KeyCode::KeyK => Some('k'),
+            KeyCode::KeyL => Some('l'),
+            KeyCode::KeyM => Some('m'),
+            KeyCode::KeyN => Some('n'),
+            KeyCode::KeyO => Some('o'),
+            KeyCode::KeyP => Some('p'),
+            KeyCode::KeyQ => Some('q'),
+            KeyCode::KeyR => Some('r'),
+            KeyCode::KeyS => Some('s'),
+            KeyCode::KeyT => Some('t'),
+            KeyCode::KeyU => Some('u'),
+            KeyCode::KeyV => Some('v'),
+            KeyCode::KeyW => Some('w'),
+            KeyCode::KeyX => Some('x'),
+            KeyCode::KeyY => Some('y'),
+            KeyCode::KeyZ => Some('z'),
+            KeyCode::Digit0 => Some('0'),
+            KeyCode::Digit1 => Some('1'),
+            KeyCode::Digit2 => Some('2'),
+            KeyCode::Digit3 => Some('3'),
+            KeyCode::Digit4 => Some('4'),
+            KeyCode::Digit5 => Some('5'),
+            KeyCode::Digit6 => Some('6'),
+            KeyCode::Digit7 => Some('7'),
+            KeyCode::Digit8 => Some('8'),
+            KeyCode::Digit9 => Some('9'),
+            KeyCode::Period => Some('.'),
+            KeyCode::Comma => Some(','),
+            KeyCode::Minus => Some('-'),
+            KeyCode::Slash => Some('/'),
+            _ => None,
+        };
+
+        if let Some(c) = char_to_add {
+            prompt_state.text.push(c);
+        }
+    }
+}
+
+fn handle_prompt_submit(
+    mut commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut prompt_state: ResMut<PromptInputState>,
+    mut pending_task: ResMut<PendingAgentTask>,
+    button_query: Query<&Interaction, (Changed<Interaction>, With<PromptSubmitButton>)>,
+    asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut registry: ResMut<agent::AgentRegistry>,
+    fs_state: Res<FileSystemState>,
+) {
+    let should_submit = (keyboard.just_pressed(KeyCode::Enter) && prompt_state.is_focused)
+        || button_query.iter().any(|i| *i == Interaction::Pressed);
+
+    if should_submit && !prompt_state.text.is_empty() {
+        println!("🚀 Launching agent with task: {}", prompt_state.text);
+
+        // Generate a unique session ID for the user-prompted agent
+        let session_id = format!("user-agent-{}", registry.session_id_order.len());
+
+        // Store task description to apply later
+        pending_task.session_id = Some(session_id.clone());
+        pending_task.task_description = prompt_state.text.clone();
+
+        // Build initial action queue with some file visits
+        let mut action_queue = std::collections::VecDeque::new();
+
+        // Pick a few random files to visit
+        if fs_state.model.total_nodes() > 0 {
+            let num_files_to_visit = 5.min(fs_state.model.total_nodes());
+            for i in 0..num_files_to_visit {
+                let target_idx = (i * fs_state.model.total_nodes() / num_files_to_visit).min(fs_state.model.total_nodes() - 1);
+                let position = galaxy::calculate_galaxy_position(&fs_state.model, target_idx);
+                action_queue.push_back(agent::AgentAction::MoveTo {
+                    position,
+                    node_index: target_idx,
+                });
+            }
+        }
+
+        // Spawn the agent using the same system as WebSocket agents
+        let greek_symbol = agent::GREEK_SYMBOLS[registry.session_id_order.len() % agent::GREEK_SYMBOLS.len()].to_string();
+
+        let _entity = agent::spawn_agent_entity(
+            &mut commands,
+            &asset_server,
+            &mut meshes,
+            &mut materials,
+            session_id.clone(),
+            action_queue,
+            greek_symbol,
+        );
+
+        registry.session_id_order.push(session_id.clone());
+        registry.map.insert(session_id.clone(), _entity);
+
+        // Clear the text and unfocus
+        prompt_state.text.clear();
+        prompt_state.is_focused = false;
+    }
+}
+
+fn apply_pending_agent_tasks(
+    mut pending_task: ResMut<PendingAgentTask>,
+    registry: Res<agent::AgentRegistry>,
+    mut agents: Query<&mut agent::Agent>,
+) {
+    if let Some(session_id) = &pending_task.session_id {
+        if let Some(&entity) = registry.map.get(session_id) {
+            if let Ok(mut agent) = agents.get_mut(entity) {
+                agent.current_action = Some(format!("Working on: {}", pending_task.task_description));
+                // Clear the pending task
+                pending_task.session_id = None;
+                pending_task.task_description.clear();
+            }
+        }
+    }
+}
+
+fn update_prompt_display(
+    mut commands: Commands,
+    prompt_state: Res<PromptInputState>,
+    input_query: Query<Entity, With<PromptInputField>>,
+    children_query: Query<&Children>,
+) {
+    let Ok(input_entity) = input_query.single() else {
+        return;
+    };
+
+    // Despawn existing children (text and cursor)
+    if let Ok(children) = children_query.get(input_entity) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    // Update text display
+    commands.entity(input_entity).with_children(|parent| {
+        if !prompt_state.is_focused && prompt_state.text.is_empty() {
+            // Show placeholder when not focused and empty
+            parent.spawn((
+                Text::new("Type a task for your AI agent..."),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.7, 0.7, 0.7, 0.6)),
+            ));
+        } else {
+            // Show user input or empty with cursor when focused
+            let display_text = if prompt_state.text.is_empty() {
+                "".to_string()
+            } else {
+                prompt_state.text.clone()
+            };
+
+            parent.spawn((
+                Text::new(&display_text),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+
+            // Add cursor when focused
+            if prompt_state.is_focused {
+                parent.spawn((
+                    Text::new("|"),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    BlinkingCursor {
+                        timer: 0.0,
+                        visible: true,
+                    },
+                ));
+            }
+        }
+    });
+}
+
+fn animate_cursor(
+    time: Res<Time>,
+    mut cursor_query: Query<(&mut BlinkingCursor, &mut TextColor)>,
+) {
+    for (mut cursor, mut color) in cursor_query.iter_mut() {
+        cursor.timer += time.delta_secs();
+
+        // Blink faster - every 0.4 seconds
+        if cursor.timer >= 0.4 {
+            cursor.timer = 0.0;
+            cursor.visible = !cursor.visible;
+
+            if cursor.visible {
+                *color = TextColor(Color::WHITE);
+            } else {
+                *color = TextColor(Color::NONE);
             }
         }
     }

@@ -117,8 +117,8 @@ const ACTION_BUBBLE_HEIGHT: f32 = 0.55;
 const ACTION_BUBBLE_Y_OFFSET: f32 = 3.6;
 const NAMEPLATE_Y_OFFSET: f32 = 2.6;
 
-const GREEK_SYMBOLS: &[&str] = &["α", "β", "γ", "δ", "ε", "ζ", "η", "θ", "ι", "κ", "λ", "μ",
-                                  "ν", "ξ", "ο", "π", "ρ", "σ", "τ", "υ", "φ", "χ", "ψ", "ω"];
+pub const GREEK_SYMBOLS: &[&str] = &["α", "β", "γ", "δ", "ε", "ζ", "η", "θ", "ι", "κ", "λ", "μ",
+                                      "ν", "ξ", "ο", "π", "ρ", "σ", "τ", "υ", "φ", "χ", "ψ", "ω"];
 
 // Ease-in-out cubic
 fn ease_in_out_cubic(t: f32) -> f32 {
@@ -189,7 +189,7 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
 }
 
 // Helper function to spawn an agent with spaceship model
-fn spawn_agent_entity(
+pub fn spawn_agent_entity(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
     meshes: &mut ResMut<Assets<Mesh>>,
