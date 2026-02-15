@@ -125,16 +125,16 @@ pub fn spawn_star(
     let size = calculate_star_size(node);
     let color = calculate_star_color(node);
 
-    // Create sphere - only directories bloom
+    // Create sphere - both folders and files bloom
     let mesh = meshes.add(Sphere::new(size));
 
-    // Only directories get high emissive for bloom effect
+    // Directories get higher emissive, files get moderate emissive
     let emissive_strength = if node.is_dir {
-        // Directories are bright stars with bloom
-        5.0 + (node.children.len() as f32 * 0.5).min(10.0)
+        // Directories are bright stars with strong bloom
+        6.0 + (node.children.len() as f32 * 0.5).min(10.0)
     } else {
-        // Files have no emissive - no bloom
-        0.0
+        // Files have moderate emissive for subtle bloom
+        2.5
     };
 
     let material = materials.add(StandardMaterial {

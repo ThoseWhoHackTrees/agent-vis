@@ -18,6 +18,9 @@ use bevy_fontmesh::FontMeshPlugin;
 struct AmbientStar {
     speed: f32,
     color_offset: f32,
+    initial_pos: Vec3,
+    orbit_radius: f32,
+    orbit_speed: f32,
 }
 use crossbeam_channel::Receiver;
 use fs_model::{FileSystemModel, GitignoreChecker, get_valid_paths};
@@ -142,7 +145,7 @@ fn setup_camera(mut commands: Commands) {
             high_pass_frequency: 1.0,
             composite_mode: BloomCompositeMode::Additive,
             prefilter: BloomPrefilter {
-                threshold: 3.0, // Only emissive values > 3.0 will bloom
+                threshold: 1.5, // Lower threshold so files can bloom too
                 threshold_softness: 0.5,
             },
             ..default()
@@ -229,10 +232,15 @@ fn setup_ambient_stars(
             Color::srgb(0.4, 0.7, 1.0) // Blue
         };
 
+        let pos = Vec3::new(x, y, z);
+
         commands.spawn((
             AmbientStar {
                 speed: 0.3 + t * 0.2,
                 color_offset: t * std::f32::consts::TAU,
+                initial_pos: pos,
+                orbit_radius: 1.0 + t * 2.0,
+                orbit_speed: 0.1 + t * 0.15,
             },
             Mesh3d(meshes.add(Sphere::new(0.15))),
             MeshMaterial3d(materials.add(StandardMaterial {
@@ -240,21 +248,31 @@ fn setup_ambient_stars(
                 emissive: LinearRgba::from(base_color) * 0.3,
                 ..default()
             })),
-            Transform::from_translation(Vec3::new(x, y, z)),
+            Transform::from_translation(pos),
         ));
     }
 }
 
 fn animate_ambient_stars(
     time: Res<Time>,
-    mut query: Query<(&AmbientStar, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut query: Query<(&AmbientStar, &mut Transform, &mut MeshMaterial3d<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (ambient_star, material_handle) in query.iter_mut() {
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            let t = time.elapsed_secs() * ambient_star.speed + ambient_star.color_offset;
+    for (ambient_star, mut transform, material_handle) in query.iter_mut() {
+        let t = time.elapsed_secs() * ambient_star.speed + ambient_star.color_offset;
 
-            // Cycle through colors smoothly
+        // Gentle orbital movement around initial position
+        let orbit_t = time.elapsed_secs() * ambient_star.orbit_speed;
+        let offset = Vec3::new(
+            ambient_star.orbit_radius * orbit_t.cos(),
+            ambient_star.orbit_radius * (orbit_t * 0.5).sin() * 0.5,
+            ambient_star.orbit_radius * orbit_t.sin(),
+        );
+
+        transform.translation = ambient_star.initial_pos + offset;
+
+        // Cycle through colors smoothly
+        if let Some(material) = materials.get_mut(&material_handle.0) {
             let color = Color::srgb(
                 0.5 + 0.5 * (t).sin(),
                 0.5 + 0.5 * (t + 2.0).sin(),
