@@ -1523,7 +1523,13 @@ fn update_file_hover_panel(
                 let base_color = tool_color(&event.tool_name);
                 let srgba = base_color.to_srgba();
                 let color = Color::srgba(srgba.red, srgba.green, srgba.blue, alpha);
-                let label = format!("{} [{}]", event.tool_name, time_str);
+
+                // Use explanation if available, otherwise show tool name
+                let label = if let Some(reason) = &event.reason {
+                    format!("{} [{}]", reason, time_str)
+                } else {
+                    format!("{} [{}]", event.tool_name, time_str)
+                };
 
                 parent.spawn((
                     Text::new(label),

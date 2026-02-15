@@ -55,6 +55,7 @@ pub struct WsClientState {
 pub struct FileEvent {
     pub tool_name: String,
     pub session_id: String,
+    pub reason: Option<String>,
     pub timestamp: Option<String>,
 }
 
@@ -374,6 +375,7 @@ pub fn process_ws_events(
                 session_id,
                 file_path,
                 tool_name,
+                reason,
                 timestamp,
             } => {
                 // Resolve file path to galaxy position
@@ -387,18 +389,22 @@ pub fn process_ws_events(
                     .and_then(|n| n.to_str())
                     .unwrap_or(&file_path);
 
-                // Create action description
-                let action_desc = format!("{} {}",
-                    match tool_name.as_str() {
-                        "Read" => "Reading",
-                        "Write" => "Writing",
-                        "Edit" => "Editing",
-                        "Grep" => "Searching",
-                        "Glob" => "Finding",
-                        _ => "Working on",
-                    },
-                    filename
-                );
+                // Use the explanation if provided, otherwise fall back to basic description
+                let action_desc = if let Some(explanation) = &reason {
+                    explanation.clone()
+                } else {
+                    format!("{} {}",
+                        match tool_name.as_str() {
+                            "Read" => "Reading",
+                            "Write" => "Writing",
+                            "Edit" => "Editing",
+                            "Grep" => "Searching",
+                            "Glob" => "Finding",
+                            _ => "Working on",
+                        },
+                        filename
+                    )
+                };
 
                 let resolved = fs_state
                     .model
@@ -411,6 +417,7 @@ pub fn process_ws_events(
                     events.push(FileEvent {
                         tool_name: tool_name.clone(),
                         session_id: session_id.clone(),
+                        reason: reason.clone(),
                         timestamp: timestamp.clone(),
                     });
                     if events.len() > 10 {
