@@ -861,12 +861,12 @@ fn update_agent_actions_display(
         }
     }
 
-    // Collect all active agents with their actions
-    let mut agent_actions: Vec<(String, String)> = agents
+    // Collect all active agents with their actions and colors
+    let mut agent_actions: Vec<(String, String, Color)> = agents
         .iter()
         .filter_map(|agent| {
             agent.current_action.as_ref().map(|action| {
-                (agent.session_id.clone(), action.clone())
+                (agent.session_id.clone(), action.clone(), agent.color)
             })
         })
         .collect();
@@ -891,7 +891,6 @@ fn update_agent_actions_display(
 
     // Add a text entity for each active action
     commands.entity(container).with_children(|parent| {
-        // Title
         parent.spawn((
             Text::new("Agent Activity"),
             TextFont {
@@ -908,9 +907,8 @@ fn update_agent_actions_display(
         // Load a font that supports Greek characters
         let greek_font = asset_server.load("fonts/FiraMono-Medium.ttf");
 
-        // Action list - each agent gets a unique color and Greek symbol
-        for (i, (session_id, action)) in agent_actions.iter().enumerate() {
-            let color = generate_agent_color(session_id);
+        // Action list - each agent uses their unique color and Greek symbol
+        for (i, (_session_id, action, color)) in agent_actions.iter().enumerate() {
             let symbol = greek_symbols[i % greek_symbols.len()];
             parent.spawn((
                 Text::new(format!("{} {}", symbol, action)),
@@ -919,7 +917,7 @@ fn update_agent_actions_display(
                     font_size: action_font_size,
                     ..default()
                 },
-                TextColor(color),
+                TextColor(*color),
             ));
         }
     });
