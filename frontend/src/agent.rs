@@ -29,6 +29,7 @@ pub struct Agent {
     pub event_queue: VecDeque<AgentAction>,
     pub state: AgentState,
     pub current_target_file: Option<usize>,
+    pub current_action: Option<String>, // Description of what the agent is doing
 }
 
 // --- Resources ---
@@ -92,6 +93,7 @@ fn spawn_agent_entity(
                 event_queue,
                 state: AgentState::Spawning { timer: 0.0 },
                 current_target_file: None,
+                current_action: None,
             },
             Transform::from_translation(Vec3::ZERO)
                 .with_scale(Vec3::ZERO)
@@ -145,12 +147,31 @@ pub fn process_ws_events(
             AgentEvent::ToolUse {
                 session_id,
                 file_path,
-                ..
+                tool_name,
             } => {
                 // Resolve file path to galaxy position
                 let canonical = PathBuf::from(&file_path)
                     .canonicalize()
                     .unwrap_or_else(|_| PathBuf::from(&file_path));
+
+                // Extract filename for display
+                let filename = canonical
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&file_path);
+
+                // Create action description
+                let action_desc = format!("{} {}",
+                    match tool_name.as_str() {
+                        "Read" => "Reading",
+                        "Write" => "Writing",
+                        "Edit" => "Editing",
+                        "Grep" => "Searching",
+                        "Glob" => "Finding",
+                        _ => "Working on",
+                    },
+                    filename
+                );
 
                 let resolved = fs_state
                     .model
@@ -169,6 +190,7 @@ pub fn process_ws_events(
                                 position,
                                 node_index: node_idx,
                             });
+                            agent.current_action = Some(action_desc.clone());
                         }
                         Some(entity)
                     } else {
@@ -191,11 +213,16 @@ pub fn process_ws_events(
                             queue,
                         );
 
-                        registry.map.insert(session_id, entity);
+                        registry.map.insert(session_id.clone(), entity);
                         Some(entity)
                     };
 
-                    let _ = entity; // suppress unused warning
+                    // Set current action for already-spawned agents
+                    if let Some(entity) = entity {
+                        if let Ok(mut agent) = agents.get_mut(entity) {
+                            agent.current_action = Some(action_desc);
+                        }
+                    }
                 } else {
                     println!(
                         "[agent] File not in galaxy, skipping: {}",
@@ -249,6 +276,7 @@ pub fn agent_state_machine(
                     let new_timer = timer + dt;
                     if new_timer >= IDLE_TIMEOUT {
                         agent.state = AgentState::Despawning { timer: 0.0 };
+                        agent.current_action = None; // Clear action when starting to despawn
                     } else {
                         agent.state = AgentState::Idle { timer: new_timer };
                     }

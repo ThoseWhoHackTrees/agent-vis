@@ -27,6 +27,9 @@ struct CameraModeButton {
     mode: CameraMode,
 }
 
+#[derive(Component)]
+struct AgentActionsContainer;
+
 #[derive(Resource)]
 struct FileSystemState {
     model: FileSystemModel,
@@ -110,6 +113,7 @@ fn main() {
                 update_camera,
                 handle_manual_camera_input,
                 billboard_labels,
+                update_agent_actions_display,
                 (
                     process_ws_events,
                     agent_state_machine,
@@ -258,6 +262,23 @@ fn setup_ui(mut commands: Commands) {
                         ));
                 });
         });
+
+    // Agent actions display at the top center
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(20.0),
+                left: Val::Percent(50.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(5.0),
+                padding: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+            AgentActionsContainer,
+        ));
 }
 
 fn setup_galaxy(
@@ -469,7 +490,7 @@ fn handle_camera_mode_buttons(
 }
 
 fn update_camera(
-    time: Res<Time>,
+    _time: Res<Time>,
     controller: Res<CameraController>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,
 ) {
@@ -566,4 +587,72 @@ fn billboard_labels(
             label_transform.rotation = camera_rotation;
         }
     }
+}
+
+fn update_agent_actions_display(
+    mut commands: Commands,
+    agents: Query<&agent::Agent>,
+    container_query: Query<Entity, With<AgentActionsContainer>>,
+    children_query: Query<&Children>,
+) {
+    // Get the container entity
+    let Ok(container) = container_query.single() else {
+        return;
+    };
+
+    // Despawn all existing child text entities
+    if let Ok(children) = children_query.get(container) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    // Collect all active agent actions
+    let mut active_actions: Vec<String> = agents
+        .iter()
+        .filter_map(|agent| agent.current_action.clone())
+        .collect();
+
+    // If there are no active actions, show a placeholder
+    if active_actions.is_empty() {
+        commands.entity(container).with_children(|parent| {
+            parent.spawn((
+                Text::new("No active agents"),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+            ));
+        });
+        return;
+    }
+
+    // Sort for consistent display
+    active_actions.sort();
+
+    // Add a text entity for each active action
+    commands.entity(container).with_children(|parent| {
+        // Title
+        parent.spawn((
+            Text::new("Agent Activity"),
+            TextFont {
+                font_size: 18.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 1.0, 0.3)),
+        ));
+
+        // Action list
+        for action in active_actions.iter() {
+            parent.spawn((
+                Text::new(format!("• {}", action)),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.9, 0.9)),
+            ));
+        }
+    });
 }
