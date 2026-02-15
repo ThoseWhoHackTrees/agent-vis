@@ -63,7 +63,7 @@ const SPAWN_DURATION: f32 = 0.5;
 const DESPAWN_DURATION: f32 = 0.5;
 const IDLE_TIMEOUT: f32 = 5.0;
 const MOVE_SPEED: f32 = 1.2; // seconds per move
-const AGENT_SCALE: f32 = 0.6;
+const AGENT_SCALE: f32 = 0.15;
 
 // Ease-in-out cubic
 fn ease_in_out_cubic(t: f32) -> f32 {
@@ -93,7 +93,7 @@ fn spawn_agent_entity(
                 state: AgentState::Spawning { timer: 0.0 },
                 current_target_file: None,
             },
-            Transform::from_translation(Vec3::ZERO)
+            Transform::from_translation(Vec3::new(0.0, 15.0, 0.0))
                 .with_scale(Vec3::ZERO)
                 .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)), // Rotate to face forward
         ))
