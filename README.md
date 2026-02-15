@@ -278,16 +278,6 @@ Built for **TreeHacks 2026** with focus on:
 - ✅ Interactive exploration
 - ✅ Production-ready architecture
 
-## 🚀 Future Enhancements
-
-- [ ] Follow mode to track specific agents
-- [ ] Replay mode to review past agent sessions
-- [ ] Agent collaboration visualization (multiple agents on same file)
-- [ ] Export session data to JSON
-- [ ] VR support for immersive exploration
-- [ ] Agent communication visualization
-- [ ] File diff visualization
-- [ ] Performance metrics dashboard
 
 ## 📝 Technical Stack
 
