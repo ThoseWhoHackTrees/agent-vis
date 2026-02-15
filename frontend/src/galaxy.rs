@@ -17,7 +17,7 @@ pub struct FileLabel {
     pub offset: Vec3,
 }
 
-/// Calculate position for a node in a galaxy spiral pattern
+/// Calculate position for a node - folders in spiral, files cluster around parent
 pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Vec3 {
     let node = &model.nodes[node_idx];
 
@@ -26,10 +26,9 @@ pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Ve
         return Vec3::new(0.0, 0.0, 0.0);
     }
 
-    // Use golden ratio for spiral distribution
     let golden_ratio = 1.618033988749;
 
-    // Use node index for consistent positioning
+    // Get index within parent's children
     let index_in_parent = if let Some(parent_idx) = node.parent {
         model.nodes[parent_idx]
             .children
@@ -40,18 +39,39 @@ pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Ve
         0
     };
 
-    // Create spiral arms based on depth
-    let angle = (node_idx as f32 * golden_ratio * 2.0 * PI) + (index_in_parent as f32 * 0.5);
-    let radius = (node.depth as f32) * 8.0 + (index_in_parent as f32) * 1.5;
+    if node.is_dir {
+        // Directories: spiral pattern based on depth
+        let angle = (node_idx as f32 * golden_ratio * 2.0 * PI) + (index_in_parent as f32 * 0.5);
+        let radius = (node.depth as f32) * 8.0 + (index_in_parent as f32) * 1.5;
+        let y = (node.depth as f32) * 2.0 - 5.0;
 
-    // Add some vertical spread based on depth
-    let y = (node.depth as f32) * 2.0 - 5.0;
+        let x = radius * angle.cos();
+        let z = radius * angle.sin();
 
-    // Spiral coordinates
-    let x = radius * angle.cos();
-    let z = radius * angle.sin();
+        Vec3::new(x, y, z)
+    } else {
+        // Files: cluster around and below parent folder
+        if let Some(parent_idx) = node.parent {
+            let parent_pos = calculate_galaxy_position(model, parent_idx);
 
-    Vec3::new(x, y, z)
+            // Distribute files in a circle around parent
+            let angle = index_in_parent as f32 * golden_ratio * 2.0 * PI;
+            let cluster_radius = 2.0; // How far from parent
+
+            let offset_x = cluster_radius * angle.cos();
+            let offset_z = cluster_radius * angle.sin();
+            let offset_y = -1.5 - (index_in_parent as f32 * 0.2).min(2.0); // Below parent
+
+            Vec3::new(
+                parent_pos.x + offset_x,
+                parent_pos.y + offset_y,
+                parent_pos.z + offset_z,
+            )
+        } else {
+            // Fallback if no parent (shouldn't happen)
+            Vec3::new(0.0, -5.0, 0.0)
+        }
+    }
 }
 
 /// Calculate star size based on node properties
