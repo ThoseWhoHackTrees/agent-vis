@@ -2,7 +2,7 @@
 
 A 3D command center for agentic swarms. Renders your codebase as a galaxy and your AI agents as spaceships navigating it in real time.
 
-![Demo Screenshot](Demo.png)
+![Demo Screenshot](Welcome-screen.png)(Demo.png)
 
 ---
 
