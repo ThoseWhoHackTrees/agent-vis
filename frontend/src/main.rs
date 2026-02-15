@@ -49,6 +49,9 @@ struct AgentActionsContainer;
 #[derive(Component)]
 struct FileStatsContainer;
 
+#[derive(Component)]
+struct ColorLegendContainer;
+
 #[derive(Resource, Default)]
 struct FileStats {
     visits: HashMap<PathBuf, usize>,
@@ -100,6 +103,17 @@ fn main() {
 
     println!("Watching directory: {}", watch_path.display());
 
+    // Build file system model eagerly so the resource is available to all startup systems
+    println!("Building file system model...");
+    let model = FileSystemModel::build_initial(watch_path.clone());
+    println!("Found {} files/directories", model.total_nodes());
+
+    let gitignore_checker = GitignoreChecker::new(&watch_path);
+
+    // Start file watcher
+    let (rx, handle) = start_file_watcher(watch_path.clone());
+    let handle = watch_directory(handle, watch_path.clone());
+
     // Start WebSocket client
     let (ws_rx, _ws_handle) = start_ws_client();
 
@@ -121,6 +135,14 @@ fn main() {
             orbit_height: 20.0,
             is_dragging: false,
             last_mouse_pos: None,
+        })
+        .insert_resource(FileSystemState {
+            model,
+            event_receiver: rx,
+            entity_map: HashMap::new(),
+            gitignore_checker,
+            root_path: watch_path,
+            _watcher_handle: handle,
         })
         .insert_resource(WsClientState { receiver: ws_rx })
         .insert_resource(AgentRegistry::default())
@@ -377,7 +399,7 @@ fn setup_orbit_circles(
     }
 }
 
-fn setup_ui(mut commands: Commands) {
+fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
     // Root UI container in bottom left
     commands
         .spawn((
@@ -518,6 +540,77 @@ fn setup_ui(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
             FileStatsContainer,
         ));
+
+    // Color legend in bottom right
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(20.0),
+                bottom: Val::Px(20.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Start,
+                row_gap: Val::Px(4.0),
+                padding: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            ColorLegendContainer,
+        ))
+        .with_children(|parent| {
+            // Title
+            parent.spawn((
+                Text::new("File Types"),
+                TextFont {
+                    font_size: 22.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+
+            // File type colors - matching galaxy.rs calculate_star_color
+            let legend_items = [
+                ("Directories", Color::srgb(1.0, 0.95, 0.7)),
+                ("Rust (.rs)", Color::srgb(1.0, 0.75, 0.6)),
+                ("Config", Color::srgb(1.0, 0.95, 0.6)),
+                ("Docs (.md)", Color::srgb(0.9, 0.8, 1.0)),
+                ("JavaScript", Color::srgb(1.0, 0.98, 0.7)),
+                ("Python (.py)", Color::srgb(0.7, 0.85, 1.0)),
+                ("Web (html/css)", Color::srgb(1.0, 0.7, 0.85)),
+                ("Compiled", Color::srgb(0.85, 0.75, 1.0)),
+                ("Go", Color::srgb(0.7, 0.9, 1.0)),
+            ];
+
+            for (label, color) in legend_items {
+                // Create a container for each legend item with square + label
+                parent.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                }).with_children(|item| {
+                    // Colored square
+                    item.spawn((
+                        Node {
+                            width: Val::Px(12.0),
+                            height: Val::Px(12.0),
+                            ..default()
+                        },
+                        BackgroundColor(color),
+                    ));
+
+                    // Label text
+                    item.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+            }
+        });
 }
 
 fn setup_galaxy(
@@ -525,53 +618,20 @@ fn setup_galaxy(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    mut fs_state: ResMut<FileSystemState>,
 ) {
-    // Get watch path from command line
-    let args: Vec<String> = env::args().collect();
-    let watch_path = if args.len() > 1 {
-        PathBuf::from(&args[1])
-            .canonicalize()
-            .expect("Failed to resolve watch path")
-    } else {
-        PathBuf::from(".")
-            .canonicalize()
-            .expect("Failed to resolve current directory")
-    };
-
-    println!("Building file system model...");
-    let model = FileSystemModel::build_initial(watch_path.clone());
-    println!("Found {} files/directories", model.total_nodes());
-
-    // Create gitignore checker
-    let gitignore_checker = GitignoreChecker::new(&watch_path);
-
-    // Start file watcher
-    let root_path = watch_path.clone();
-    let (rx, handle) = start_file_watcher(watch_path.clone());
-    let handle = watch_directory(handle, watch_path);
-
-    // Spawn initial galaxy
-    let mut entity_map = HashMap::new();
-    for node_idx in 0..model.total_nodes() {
+    // Spawn initial galaxy stars from the already-built file system model
+    for node_idx in 0..fs_state.model.total_nodes() {
         let entity = spawn_star(
             &mut commands,
             &mut meshes,
             &mut materials,
             &asset_server,
-            &model,
+            &fs_state.model,
             node_idx,
         );
-        entity_map.insert(node_idx, entity);
+        fs_state.entity_map.insert(node_idx, entity);
     }
-
-    commands.insert_resource(FileSystemState {
-        model,
-        event_receiver: rx,
-        entity_map,
-        gitignore_checker,
-        root_path,
-        _watcher_handle: handle,
-    });
 }
 
 fn is_gitignore_file(path: &PathBuf) -> bool {
