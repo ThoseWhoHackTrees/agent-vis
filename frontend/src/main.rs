@@ -670,21 +670,24 @@ fn setup_ui(mut commands: Commands, _fs_state: Res<FileSystemState>) {
             ];
 
             for (label, color) in legend_items {
-                // Create a container for each legend item with square + label
+                // Create a container for each legend item with mini planet + label
                 parent.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(8.0),
                     ..default()
                 }).with_children(|item| {
-                    // Colored square
+                    // Mini planet (circular with border)
                     item.spawn((
                         Node {
-                            width: Val::Px(12.0),
-                            height: Val::Px(12.0),
+                            width: Val::Px(14.0),
+                            height: Val::Px(14.0),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(7.0)), // Make it circular
                             ..default()
                         },
                         BackgroundColor(color),
+                        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.3)), // Subtle white border
                     ));
 
                     // Label text
