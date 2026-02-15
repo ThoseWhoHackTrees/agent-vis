@@ -70,6 +70,15 @@ struct PromptInputField;
 struct PromptSubmitButton;
 
 #[derive(Component)]
+struct HelpButton;
+
+#[derive(Component)]
+struct TipsOverlay;
+
+#[derive(Component)]
+struct CloseOverlayButton;
+
+#[derive(Component)]
 struct IdleSpaceship {
     float_offset: f32,
     pulse_phase: f32,
@@ -91,6 +100,12 @@ struct BlinkingCursor {
 struct PendingAgentTask {
     session_id: Option<String>,
     task_description: String,
+}
+
+#[derive(Resource)]
+struct TipsState {
+    visible: bool,
+    has_been_shown: bool,
 }
 
 #[derive(Resource, Default)]
@@ -209,6 +224,10 @@ fn main() {
         .insert_resource(HoveredFile::default())
         .insert_resource(PromptInputState::default())
         .insert_resource(PendingAgentTask::default())
+        .insert_resource(TipsState {
+            visible: true, // Show on first load
+            has_been_shown: false,
+        })
         .add_message::<AgentArrivedEvent>()
         .add_observer(on_file_star_over)
         .add_observer(on_file_star_out)
@@ -255,6 +274,9 @@ fn main() {
                 apply_pending_agent_tasks,
                 update_prompt_display,
                 animate_cursor,
+                handle_help_button,
+                handle_close_overlay,
+                update_tips_overlay,
             ),
         )
         .add_systems(
@@ -818,6 +840,122 @@ fn setup_ui(mut commands: Commands, _fs_state: Res<FileSystemState>) {
                 });
             }
         });
+
+    // Help button in bottom right corner (above color legend)
+    commands.spawn((
+        Button,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(20.0),
+            bottom: Val::Px(460.0), // Position above color legend
+            width: Val::Px(50.0),
+            height: Val::Px(50.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(2.0)),
+            border_radius: BorderRadius::all(Val::Px(25.0)), // Circular
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.6, 0.45, 0.9, 0.9)),
+        BorderColor::all(Color::srgba(0.8, 0.6, 1.0, 0.6)),
+        HelpButton,
+    ))
+    .with_child((
+        Text::new("?"),
+        TextFont {
+            font_size: 28.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+    ));
+
+    // Tips overlay (initially visible, will be managed by update_tips_overlay)
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)), // Semi-transparent backdrop
+        TipsOverlay,
+        GlobalZIndex(1000), // On top of everything
+    ))
+    .with_children(|parent| {
+        // Tips panel
+        parent.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(40.0)),
+                border: UiRect::all(Val::Px(3.0)),
+                border_radius: BorderRadius::all(Val::Px(20.0)),
+                row_gap: Val::Px(20.0),
+                max_width: Val::Px(600.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.05, 0.02, 0.15)),
+            BorderColor::all(Color::srgb(0.6, 0.45, 0.9)),
+        ))
+        .with_children(|panel| {
+            // Title
+            panel.spawn((
+                Text::new("Welcome to Space Agents!"),
+                TextFont {
+                    font_size: 32.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.8, 1.0)),
+            ));
+
+            // Tips
+            let tips = [
+                "Stars represent files & folders in your codebase",
+                "Spaceships are AI agents working on your code",
+                "Hover over a star to see recent activity",
+                "Use the prompt bar at the top to give agents tasks",
+                "Watch the Agent Activity panel to see what they're doing",
+            ];
+
+            for tip in tips {
+                panel.spawn((
+                    Text::new(tip),
+                    TextFont {
+                        font_size: 18.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            }
+
+            // Close button
+            panel.spawn((
+                Button,
+                Node {
+                    margin: UiRect::top(Val::Px(20.0)),
+                    padding: UiRect::axes(Val::Px(30.0), Val::Px(15.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    align_self: AlignSelf::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.6, 0.45, 0.9)),
+                BorderColor::all(Color::srgba(0.8, 0.6, 1.0, 0.6)),
+                CloseOverlayButton,
+            ))
+            .with_child((
+                Text::new("Got it!"),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+    });
 }
 
 fn setup_vignette(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
@@ -1864,5 +2002,41 @@ fn animate_cursor(
                 *color = TextColor(Color::NONE);
             }
         }
+    }
+}
+
+fn handle_help_button(
+    mut tips_state: ResMut<TipsState>,
+    button_query: Query<&Interaction, (Changed<Interaction>, With<HelpButton>)>,
+) {
+    for interaction in button_query.iter() {
+        if *interaction == Interaction::Pressed {
+            tips_state.visible = true;
+        }
+    }
+}
+
+fn handle_close_overlay(
+    mut tips_state: ResMut<TipsState>,
+    button_query: Query<&Interaction, (Changed<Interaction>, With<CloseOverlayButton>)>,
+) {
+    for interaction in button_query.iter() {
+        if *interaction == Interaction::Pressed {
+            tips_state.visible = false;
+            tips_state.has_been_shown = true;
+        }
+    }
+}
+
+fn update_tips_overlay(
+    tips_state: Res<TipsState>,
+    mut overlay_query: Query<&mut Node, With<TipsOverlay>>,
+) {
+    if let Ok(mut node) = overlay_query.single_mut() {
+        node.display = if tips_state.visible {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
