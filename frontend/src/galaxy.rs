@@ -1,6 +1,6 @@
 // hello world
 use bevy::prelude::*;
-use bevy_fontmesh::{FontMesh, TextMesh, TextMeshBundle, TextMeshStyle};
+use bevy_fontmesh::{TextMesh, TextMeshBundle, TextMeshStyle};
 use crate::fs_model::{FileNode, FileSystemModel};
 use std::f32::consts::PI;
 
