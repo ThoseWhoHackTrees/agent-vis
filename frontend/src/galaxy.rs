@@ -83,7 +83,6 @@ pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Ve
 pub fn calculate_star_size(node: &FileNode) -> f32 {
     if node.is_dir {
         // Directories are larger, and slightly bigger the higher they are in the tree (lower depth)
-        // Much smaller overall scale
         let depth_size_bonus = if node.depth == 0 {
             0.3 // Root is slightly bigger
         } else if node.depth == 1 {
@@ -97,8 +96,30 @@ pub fn calculate_star_size(node: &FileNode) -> f32 {
 
         base_size + children_bonus
     } else {
-        // Files are smaller
-        0.3
+        // Files: size based on line count
+        let line_count = count_file_lines(&node.path);
+        let base_size = 0.2;
+
+        // Scale size based on line count (logarithmic scaling)
+        // 0 lines = 0.2, 100 lines = 0.3, 1000 lines = 0.5, 10000 lines = 0.7
+        let size_bonus = if line_count > 0 {
+            ((line_count as f32).log10() * 0.15).min(0.5)
+        } else {
+            0.0
+        };
+
+        base_size + size_bonus
+    }
+}
+
+fn count_file_lines(path: &std::path::Path) -> usize {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    if let Ok(file) = File::open(path) {
+        BufReader::new(file).lines().count()
+    } else {
+        0
     }
 }
 

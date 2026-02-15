@@ -46,6 +46,14 @@ struct CameraModeButton {
 #[derive(Component)]
 struct AgentActionsContainer;
 
+#[derive(Component)]
+struct FileStatsContainer;
+
+#[derive(Resource, Default)]
+struct FileStats {
+    visits: HashMap<PathBuf, usize>,
+}
+
 #[derive(Resource)]
 struct FileSystemState {
     model: FileSystemModel,
@@ -116,6 +124,7 @@ fn main() {
         })
         .insert_resource(WsClientState { receiver: ws_rx })
         .insert_resource(AgentRegistry::default())
+        .insert_resource(FileStats::default())
         .add_message::<AgentArrivedEvent>()
         .add_systems(
             Startup,
@@ -130,6 +139,8 @@ fn main() {
                 handle_manual_camera_input,
                 billboard_labels,
                 update_agent_actions_display,
+                update_file_stats_display,
+                track_file_visits,
                 (
                     process_ws_events,
                     agent_state_machine,
@@ -369,23 +380,27 @@ fn setup_orbit_circles(
 fn setup_ui(mut commands: Commands) {
     // Root UI container in bottom left
     commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(20.0),
-            bottom: Val::Px(20.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(20.0),
+                bottom: Val::Px(20.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(10.0),
+                padding: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+        ))
         .with_children(|parent| {
             // Title
             parent.spawn((
                 Text::new("Camera Mode"),
                 TextFont {
-                    font_size: 20.0,
+                    font_size: 22.0,
                     ..default()
                 },
-                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                TextColor(Color::WHITE),
             ));
 
             // Button container
@@ -485,6 +500,23 @@ fn setup_ui(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
             AgentActionsContainer,
+        ));
+
+    // File stats display above camera mode (bottom left, above the camera controls)
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(20.0),
+                bottom: Val::Px(180.0), // Position above camera mode
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Start,
+                row_gap: Val::Px(4.0),
+                padding: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            FileStatsContainer,
         ));
 }
 
@@ -807,6 +839,7 @@ fn update_agent_actions_display(
     container_query: Query<Entity, With<AgentActionsContainer>>,
     children_query: Query<&Children>,
     windows: Query<&Window>,
+    asset_server: Res<AssetServer>,
 ) {
     // Get the container entity
     let Ok(container) = container_query.single() else {
@@ -818,7 +851,7 @@ fn update_agent_actions_display(
         return;
     };
     let base_font_size = (window.width() / 80.0).clamp(14.0, 24.0);
-    let title_font_size = base_font_size * 1.5;
+    let _title_font_size = base_font_size * 1.5;
     let action_font_size = base_font_size * 0.75;
 
     // Despawn all existing child text entities
@@ -859,22 +892,30 @@ fn update_agent_actions_display(
     // Add a text entity for each active action
     commands.entity(container).with_children(|parent| {
         // Title
-        // Title in white
         parent.spawn((
             Text::new("Agent Activity"),
             TextFont {
-                font_size: title_font_size,
+                font_size: 22.0,
                 ..default()
             },
             TextColor(Color::WHITE),
         ));
 
-        // Action list - each agent gets a unique color
-        for (session_id, action) in agent_actions.iter() {
+        // Greek alphabet symbols
+        let greek_symbols = ["α", "β", "γ", "δ", "ε", "ζ", "η", "θ", "ι", "κ", "λ", "μ",
+                             "ν", "ξ", "ο", "π", "ρ", "σ", "τ", "υ", "φ", "χ", "ψ", "ω"];
+
+        // Load a font that supports Greek characters
+        let greek_font = asset_server.load("fonts/FiraMono-Medium.ttf");
+
+        // Action list - each agent gets a unique color and Greek symbol
+        for (i, (session_id, action)) in agent_actions.iter().enumerate() {
             let color = generate_agent_color(session_id);
+            let symbol = greek_symbols[i % greek_symbols.len()];
             parent.spawn((
-                Text::new(format!("• {}", action)),
+                Text::new(format!("{} {}", symbol, action)),
                 TextFont {
+                    font: greek_font.clone(),
                     font_size: action_font_size,
                     ..default()
                 },
@@ -900,6 +941,80 @@ fn generate_agent_color(session_id: &str) -> Color {
 
     // Convert HSL to RGB
     hsl_to_rgb(hue, saturation, lightness)
+}
+
+fn track_file_visits(
+    mut file_stats: ResMut<FileStats>,
+    mut arrived_events: MessageReader<AgentArrivedEvent>,
+    fs_state: Res<FileSystemState>,
+) {
+    for event in arrived_events.read() {
+        // Get the file path for this node
+        if let Some(node) = fs_state.model.nodes.get(event.node_index) {
+            let path = node.path.clone();
+            *file_stats.visits.entry(path).or_insert(0) += 1;
+        }
+    }
+}
+
+fn update_file_stats_display(
+    mut commands: Commands,
+    file_stats: Res<FileStats>,
+    fs_state: Res<FileSystemState>,
+    container_query: Query<Entity, With<FileStatsContainer>>,
+    children_query: Query<&Children>,
+) {
+    let Ok(container) = container_query.single() else {
+        return;
+    };
+
+    // Despawn all existing children
+    if let Ok(children) = children_query.get(container) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    // Get top 6 most visited files
+    let mut sorted_visits: Vec<_> = file_stats.visits.iter().collect();
+    sorted_visits.sort_by(|a, b| b.1.cmp(a.1));
+    let top_6: Vec<_> = sorted_visits.into_iter().take(6).collect();
+
+    commands.entity(container).with_children(|parent| {
+        if top_6.is_empty() {
+            parent.spawn((
+                Text::new("No activity yet"),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+            ));
+        } else {
+            for (path, count) in top_6 {
+                let filename = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+
+                // Get node color from galaxy
+                let color = if let Some((node_idx, _)) = fs_state.model.get_node_by_path(path) {
+                    let node = &fs_state.model.nodes[node_idx];
+                    galaxy::calculate_star_color(node)
+                } else {
+                    Color::srgb(0.7, 0.7, 0.7)
+                };
+
+                parent.spawn((
+                    Text::new(format!("{}  {} edits", filename, count)),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(color),
+                ));
+            }
+        }
+    });
 }
 
 // Convert HSL to RGB color
