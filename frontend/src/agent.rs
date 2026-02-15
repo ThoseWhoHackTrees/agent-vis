@@ -147,7 +147,7 @@ fn spawn_agent_entity(
     event_queue: VecDeque<AgentAction>,
 ) -> Entity {
     // Load the spaceship GLB scene
-    let spaceship_scene = asset_server.load("low_poly_spaceships.glb#Scene0");
+    let spaceship_scene = asset_server.load("spaceships.glb#Scene0");
 
     // Generate consistent color for this agent
     let agent_color = generate_agent_color(&session_id);

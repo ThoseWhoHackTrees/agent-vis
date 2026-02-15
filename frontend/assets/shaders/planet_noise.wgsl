@@ -62,21 +62,21 @@ fn fragment(
     // Get the standard PBR input
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
-    // Use world position for consistent noise across the sphere
-    let world_pos = in.world_position.xyz;
+    // Crescent shadow effect - light from upper right
+    let light_dir = normalize(vec3<f32>(0.7, 0.5, 0.3));
+    let normal = normalize(in.world_normal);
+    let light_amount = dot(normal, light_dir);
 
-    // Generate fractal noise
-    let noise = fractal_noise(world_pos);
+    // Create crescent shadow - dark on the opposite side of light
+    let shadow_intensity = 0.6; // How dark the shadow is
+    let shadow_factor = smoothstep(-0.3, 0.8, light_amount);
+    let crescent_darken = mix(1.0 - shadow_intensity, 1.0, shadow_factor);
 
-    // Map noise to darkening factor
-    let darken_min = 1.0 - extension.noise_intensity * 0.3;
-    let darken = mix(darken_min, 1.0, noise);
+    // Apply crescent shadow to base color
+    pbr_input.material.base_color = pbr_input.material.base_color * vec4<f32>(crescent_darken, crescent_darken, crescent_darken, 1.0);
 
-    // Apply darkening to base color
-    pbr_input.material.base_color = pbr_input.material.base_color * vec4<f32>(darken, darken, darken, 1.0);
-
-    // Also darken the emissive a bit
-    pbr_input.material.emissive = pbr_input.material.emissive * darken;
+    // Don't darken emissive - keep bloom bright
+    // pbr_input.material.emissive stays unchanged
 
     // Alpha discard (takes material + color, returns discarded color)
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);

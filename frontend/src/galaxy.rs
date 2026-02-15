@@ -2,6 +2,7 @@
 use bevy::prelude::*;
 use bevy_fontmesh::{TextMesh, TextMeshBundle, TextMeshStyle};
 use crate::fs_model::{FileNode, FileSystemModel};
+use crate::planet_material::{PlanetMaterial, PlanetMaterialExtension};
 use std::f32::consts::PI;
 
 #[derive(Component)]
@@ -153,6 +154,7 @@ pub fn spawn_star(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    planet_materials: &mut ResMut<Assets<PlanetMaterial>>,
     asset_server: &Res<AssetServer>,
     model: &FileSystemModel,
     node_idx: usize,
@@ -174,10 +176,18 @@ pub fn spawn_star(
         2.5
     };
 
-    let material = materials.add(StandardMaterial {
-        base_color: color,
-        emissive: LinearRgba::from(color) * emissive_strength,
-        ..default()
+    // Use planet material with crescent shadow effect
+    let material = planet_materials.add(PlanetMaterial {
+        base: StandardMaterial {
+            base_color: color,
+            emissive: LinearRgba::from(color) * emissive_strength,
+            ..default()
+        },
+        extension: PlanetMaterialExtension {
+            base_color: LinearRgba::from(color),
+            noise_scale: 1.0,
+            noise_intensity: 0.0, // No noise, just shadow
+        },
     });
 
     // Spawn the star
@@ -228,10 +238,11 @@ pub fn spawn_galaxy(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    planet_materials: &mut ResMut<Assets<PlanetMaterial>>,
     asset_server: &Res<AssetServer>,
     model: &FileSystemModel,
 ) {
     for node_idx in 0..model.total_nodes() {
-        spawn_star(commands, meshes, materials, asset_server, model, node_idx);
+        spawn_star(commands, meshes, materials, planet_materials, asset_server, model, node_idx);
     }
 }

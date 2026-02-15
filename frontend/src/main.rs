@@ -16,6 +16,7 @@ use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use bevy_fontmesh::FontMeshPlugin;
+use planet_material::PlanetMaterial;
 
 #[derive(Component)]
 struct AmbientStar {
@@ -144,6 +145,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(FontMeshPlugin)
+        .add_plugins(MaterialPlugin::<PlanetMaterial>::default())
         .add_plugins(MeshPickingPlugin)
         .insert_resource(ClearColor(Color::srgb(0.05, 0.02, 0.15))) // Deep purple background
         .insert_resource(CameraController {
@@ -431,6 +433,7 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(20.0),
                 bottom: Val::Px(20.0),
+                width: Val::Px(320.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(10.0),
                 padding: UiRect::all(Val::Px(20.0)),
@@ -541,6 +544,7 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 position_type: PositionType::Absolute,
                 top: Val::Px(20.0),
                 left: Val::Px(20.0),
+                width: Val::Px(320.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Start,
                 row_gap: Val::Px(8.0),
@@ -561,6 +565,7 @@ fn setup_ui(mut commands: Commands, fs_state: Res<FileSystemState>) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(20.0),
                 bottom: Val::Px(180.0), // Position above camera mode
+                width: Val::Px(320.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Start,
                 row_gap: Val::Px(4.0),
@@ -678,6 +683,7 @@ fn setup_galaxy(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut planet_materials: ResMut<Assets<PlanetMaterial>>,
     asset_server: Res<AssetServer>,
     mut fs_state: ResMut<FileSystemState>,
 ) {
@@ -687,6 +693,7 @@ fn setup_galaxy(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut planet_materials,
             &asset_server,
             &fs_state.model,
             node_idx,
@@ -718,6 +725,7 @@ fn update_file_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut planet_materials: ResMut<Assets<PlanetMaterial>>,
     asset_server: Res<AssetServer>,
     label_query: Query<(Entity, &FileLabel)>,
 ) {
@@ -747,6 +755,7 @@ fn update_file_system(
                         &mut commands,
                         &mut meshes,
                         &mut materials,
+                        &mut planet_materials,
                         &asset_server,
                         &fs_state.model,
                         node_idx,
@@ -810,6 +819,7 @@ fn update_file_system(
                         &mut commands,
                         &mut meshes,
                         &mut materials,
+                        &mut planet_materials,
                         &asset_server,
                         &fs_state.model,
                         node_idx,
@@ -1123,14 +1133,33 @@ fn update_file_stats_display(
                     Color::srgb(0.7, 0.7, 0.7)
                 };
 
-                parent.spawn((
-                    Text::new(format!("{}  {} edits", filename, count)),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(color),
-                ));
+                // Create a row container for each file entry
+                parent.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    width: Val::Percent(100.0),
+                    ..default()
+                }).with_children(|row| {
+                    // Filename (left-aligned, colored)
+                    row.spawn((
+                        Text::new(filename),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(color),
+                    ));
+
+                    // Edit count (right-aligned, white)
+                    row.spawn((
+                        Text::new(format!("{} edits", count)),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
             }
         }
     });
