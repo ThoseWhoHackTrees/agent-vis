@@ -44,6 +44,23 @@ pub struct WsClientState {
     pub receiver: Receiver<AgentEvent>,
 }
 
+// --- File event history ---
+
+#[derive(Debug, Clone)]
+pub struct FileEvent {
+    pub tool_name: String,
+    pub session_id: String,
+    pub timestamp: Option<String>,
+}
+
+#[derive(Resource, Default)]
+pub struct FileEventHistory {
+    pub map: HashMap<usize, Vec<FileEvent>>, // node_index -> events (max 10)
+}
+
+#[derive(Resource, Default)]
+pub struct HoveredFile(pub Option<usize>);
+
 // --- Messages ---
 
 #[derive(Message)]
@@ -134,6 +151,7 @@ pub fn process_ws_events(
     fs_state: Res<FileSystemState>,
     mut registry: ResMut<AgentRegistry>,
     mut agents: Query<&mut Agent>,
+    mut event_history: ResMut<FileEventHistory>,
 ) {
     while let Ok(event) = ws_state.receiver.try_recv() {
         match event {
@@ -165,6 +183,7 @@ pub fn process_ws_events(
                 session_id,
                 file_path,
                 tool_name,
+                timestamp,
             } => {
                 // Resolve file path to galaxy position
                 let canonical = PathBuf::from(&file_path)
@@ -196,6 +215,17 @@ pub fn process_ws_events(
                     .map(|(idx, _)| (idx, calculate_galaxy_position(&fs_state.model, idx)));
 
                 if let Some((node_idx, position)) = resolved {
+                    // Record event in history
+                    let events = event_history.map.entry(node_idx).or_default();
+                    events.push(FileEvent {
+                        tool_name: tool_name.clone(),
+                        session_id: session_id.clone(),
+                        timestamp: timestamp.clone(),
+                    });
+                    if events.len() > 10 {
+                        events.remove(0);
+                    }
+
                     // Get or create agent
                     let entity = if let Some(&entity) = registry.map.get(&session_id) {
                         // Cancel despawn if needed
@@ -509,6 +539,31 @@ pub fn process_spaceship_materials(
         // Remove the marker component once we've processed materials
         if processed_any {
             commands.entity(entity).remove::<UnprocessedSpaceship>();
+        }
+    }
+}
+
+// --- Picking observers for file star hover ---
+
+pub fn on_file_star_over(
+    event: On<Pointer<Over>>,
+    stars: Query<&FileStar>,
+    mut hovered: ResMut<HoveredFile>,
+) {
+    if let Ok(star) = stars.get(event.entity) {
+        hovered.0 = Some(star.node_index);
+    }
+}
+
+pub fn on_file_star_out(
+    event: On<Pointer<Out>>,
+    stars: Query<&FileStar>,
+    mut hovered: ResMut<HoveredFile>,
+) {
+    if let Ok(star) = stars.get(event.entity) {
+        // Only clear if we're still hovering this specific star
+        if hovered.0 == Some(star.node_index) {
+            hovered.0 = None;
         }
     }
 }

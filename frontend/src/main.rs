@@ -7,9 +7,11 @@ mod watcher;
 mod ws_client;
 
 use agent::{
-    AgentArrivedEvent, AgentRegistry, WsClientState, agent_despawn_system, agent_state_machine,
-    agent_transform_system, file_highlight_system, process_spaceship_materials, process_ws_events,
+    AgentArrivedEvent, AgentRegistry, FileEventHistory, HoveredFile, WsClientState,
+    agent_despawn_system, agent_state_machine, agent_transform_system, file_highlight_system,
+    on_file_star_out, on_file_star_over, process_spaceship_materials, process_ws_events,
 };
+use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
@@ -45,6 +47,9 @@ struct CameraModeButton {
 
 #[derive(Component)]
 struct AgentActionsContainer;
+
+#[derive(Component)]
+struct FileHoverPanel;
 
 #[derive(Resource)]
 struct FileSystemState {
@@ -105,6 +110,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(FontMeshPlugin)
+        .add_plugins(MeshPickingPlugin)
         .insert_resource(ClearColor(Color::srgb(0.05, 0.02, 0.15))) // Deep purple background
         .insert_resource(CameraController {
             mode: CameraMode::Auto,
@@ -116,7 +122,11 @@ fn main() {
         })
         .insert_resource(WsClientState { receiver: ws_rx })
         .insert_resource(AgentRegistry::default())
+        .insert_resource(FileEventHistory::default())
+        .insert_resource(HoveredFile::default())
         .add_message::<AgentArrivedEvent>()
+        .add_observer(on_file_star_over)
+        .add_observer(on_file_star_out)
         .add_systems(
             Startup,
             (setup_camera, setup_lighting, setup_galaxy, setup_ui, setup_ambient_stars, setup_orbit_circles),
@@ -130,6 +140,7 @@ fn main() {
                 handle_manual_camera_input,
                 billboard_labels,
                 update_agent_actions_display,
+                update_file_hover_panel,
                 (
                     process_ws_events,
                     agent_state_machine,
@@ -486,6 +497,23 @@ fn setup_ui(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
             AgentActionsContainer,
         ));
+
+    // File hover panel at the top right (hidden by default)
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(20.0),
+            right: Val::Px(20.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Start,
+            row_gap: Val::Px(6.0),
+            padding: UiRect::all(Val::Px(16.0)),
+            display: Display::None,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+        FileHoverPanel,
+    ));
 }
 
 fn setup_galaxy(
@@ -923,4 +951,119 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
     };
 
     Color::srgb(r + m, g + m, b + m)
+}
+
+fn extract_time_from_rfc3339(ts: &str) -> &str {
+    // RFC3339: "2024-01-15T14:30:45.123Z" or "2024-01-15T14:30:45+00:00"
+    // Extract HH:MM:SS portion
+    if let Some(t_pos) = ts.find('T') {
+        let after_t = &ts[t_pos + 1..];
+        // Take up to 8 chars for HH:MM:SS
+        if after_t.len() >= 8 {
+            &after_t[..8]
+        } else {
+            after_t
+        }
+    } else {
+        ts
+    }
+}
+
+fn tool_color(tool_name: &str) -> Color {
+    match tool_name {
+        "Read" => Color::srgb(0.4, 0.9, 0.9),   // Cyan
+        "Write" => Color::srgb(1.0, 0.65, 0.3),  // Orange
+        "Edit" => Color::srgb(0.4, 0.9, 0.4),    // Green
+        _ => Color::srgb(0.7, 0.7, 0.7),          // Gray
+    }
+}
+
+fn update_file_hover_panel(
+    mut commands: Commands,
+    hovered: Res<HoveredFile>,
+    event_history: Res<FileEventHistory>,
+    fs_state: Res<FileSystemState>,
+    mut panel_query: Query<(Entity, &mut Node), With<FileHoverPanel>>,
+    children_query: Query<&Children>,
+    windows: Query<&Window>,
+) {
+    let Ok((panel_entity, mut panel_node)) = panel_query.single_mut() else {
+        return;
+    };
+
+    // Despawn old children
+    if let Ok(children) = children_query.get(panel_entity) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    let Some(node_idx) = hovered.0 else {
+        panel_node.display = Display::None;
+        return;
+    };
+
+    panel_node.display = Display::Flex;
+
+    // Get font sizes
+    let base_font_size = if let Ok(window) = windows.single() {
+        (window.width() / 80.0).clamp(14.0, 24.0)
+    } else {
+        16.0
+    };
+    let title_font_size = base_font_size * 1.2;
+    let event_font_size = base_font_size * 0.75;
+
+    // Get file name
+    let file_name = if node_idx < fs_state.model.nodes.len() {
+        fs_state.model.nodes[node_idx].name.clone()
+    } else {
+        "Unknown".to_string()
+    };
+
+    commands.entity(panel_entity).with_children(|parent| {
+        // Title: file name
+        parent.spawn((
+            Text::new(file_name),
+            TextFont {
+                font_size: title_font_size,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+
+        // Get events for this file
+        if let Some(events) = event_history.map.get(&node_idx) {
+            // Show last 3 events, most recent first
+            let recent: Vec<_> = events.iter().rev().take(3).collect();
+            for event in recent {
+                let time_str = event
+                    .timestamp
+                    .as_deref()
+                    .map(extract_time_from_rfc3339)
+                    .unwrap_or("--:--:--");
+
+                let color = tool_color(&event.tool_name);
+                let label = format!("{} [{}]", event.tool_name, time_str);
+
+                parent.spawn((
+                    Text::new(label),
+                    TextFont {
+                        font_size: event_font_size,
+                        ..default()
+                    },
+                    TextColor(color),
+                ));
+            }
+        } else {
+            parent.spawn((
+                Text::new("No recent events"),
+                TextFont {
+                    font_size: event_font_size,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+            ));
+        }
+    });
 }
