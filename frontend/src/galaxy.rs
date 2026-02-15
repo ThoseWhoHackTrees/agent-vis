@@ -42,26 +42,30 @@ pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Ve
 
     if node.is_dir {
         // Directories: spiral pattern based on depth
+        // Higher in the tree (lower depth) = slightly higher in space
         let angle = (node_idx as f32 * golden_ratio * 2.0 * PI) + (index_in_parent as f32 * 0.5);
         let radius = (node.depth as f32) * 8.0 + (index_in_parent as f32) * 1.5;
-        let y = (node.depth as f32) * 2.0 - 5.0;
+
+        // Root slightly above origin, everything else slightly below
+        // Much smaller variation: root at ~2, depth 1 at ~0, depth 2 at ~-2, etc.
+        let y = 2.0 - (node.depth as f32) * 2.0;
 
         let x = radius * angle.cos();
         let z = radius * angle.sin();
 
         Vec3::new(x, y, z)
     } else {
-        // Files: cluster around and below parent folder
+        // Files: cluster around and below parent folder, more spread out
         if let Some(parent_idx) = node.parent {
             let parent_pos = calculate_galaxy_position(model, parent_idx);
 
-            // Distribute files in a circle around parent
+            // Distribute files in a circle around parent, more spread out
             let angle = index_in_parent as f32 * golden_ratio * 2.0 * PI;
-            let cluster_radius = 2.0; // How far from parent
+            let cluster_radius = 3.5; // Increased from 2.0 for more spread
 
             let offset_x = cluster_radius * angle.cos();
             let offset_z = cluster_radius * angle.sin();
-            let offset_y = -1.5 - (index_in_parent as f32 * 0.2).min(2.0); // Below parent
+            let offset_y = -2.0 - (index_in_parent as f32 * 0.3).min(3.0); // Below parent, more vertical spread
 
             Vec3::new(
                 parent_pos.x + offset_x,
@@ -78,8 +82,20 @@ pub fn calculate_galaxy_position(model: &FileSystemModel, node_idx: usize) -> Ve
 /// Calculate star size based on node properties
 pub fn calculate_star_size(node: &FileNode) -> f32 {
     if node.is_dir {
-        // Directories are larger
-        0.8 + (node.children.len() as f32 * 0.05).min(1.2)
+        // Directories are larger, and slightly bigger the higher they are in the tree (lower depth)
+        // Much smaller overall scale
+        let depth_size_bonus = if node.depth == 0 {
+            0.3 // Root is slightly bigger
+        } else if node.depth == 1 {
+            0.2
+        } else {
+            0.1 // Deeper levels just a bit bigger than files
+        };
+
+        let base_size = 0.5 + depth_size_bonus;
+        let children_bonus = (node.children.len() as f32 * 0.05).min(0.3);
+
+        base_size + children_bonus
     } else {
         // Files are smaller
         0.3
